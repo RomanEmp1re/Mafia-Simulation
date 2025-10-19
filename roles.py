@@ -13,79 +13,87 @@ seriff - точная информация что данный игрок явл
 '''
 
 class Player:
-    table = None # сюда будет помещен стол, чтобы доставать роли
     def __init__(self, id):
         self.id = id
         self.alive = True
-        self.votes_got = 0
         self.role = 'Мирный'
         self.knowledge = pd.DataFrame(
             index=range(1, 11),
             data={
             'suspection': [0] * 10,
             'color': 0,
-            'seriff': 0
+            'seriff': 0,
+            'alive': True
         })
         self.knowledge.loc[self.id, 'color'] = 1
 
     def __str__(self):
         return f'Игрок #{self.id}, роль - {self.role}'
 
-    def target_for_vote(self) -> int:
-        if isinstance(target, int):
-            target = self.table[target]
-        if len(self.exact_mafia) > 0:
-            return random.choice(self.exact_mafia)
+    def target_for_vote(self, candidates) -> int:
+        lvl1_candidates = list(set(candidates).intersection(self.exact_mafia))
+        if len(lvl1_candidates) > 0:
+            return random.choice(lvl1_candidates)
         else:
-            return random.choice(self.unknown_players)
+            return random.choice(candidates)
 
-    def vote(self, game_state) -> int:
-        target = self.target_for_vote(game_state)
-        target.votes_got += 1
+    def vote(self, target, vote_table):
+        if isinstance(target, Player):
+            target = target.id
+        vote_table.loc[self.id, 'votes_for'] = target
+        vote_table.loc[target, 'votes_recieved'] += 1
+        return target.id
 
     @property
     def exact_citizens(self):
-        return self.knowledge[self.knowledge['color'] == 1].index.to_list()
+        return self.knowledge.query('alive and color == 1').index.to_list()
 
     @property
     def exact_mafia(self):
-        return self.knowledge[self.knowledge['color'] == -1].index.to_list()
+        return self.knowledge.query('alive and color == -1').index.to_list()
 
     @property
     def unknown_players(self):
-        return self.knowledge[self.knowledge['color'] == 0].index.to_list()
+        return self.knowledge.query('alive and color == 0').index.to_list()
 
     @property
     def seriff(self):
-        return self.knowledge[self.knowledge['seriff'] == 1].index.max()
+        return self.knowledge.query('alive and seriff == 1').index.max()
 
 class MafiaPlayer(Player):
     def __init__(self, id):
         super().__init__(id)
         self.role = 'Мафия'
         self.knowledge.loc[self.id, 'color'] = -1
-
-    def shot(self, target) -> int:
-        target.alive = False
-        return target.id
+        self.shot_assigner = False
 
     @property
-    def unknown_citizen(self):
-        return self.knowledge[
-            self.knowledge['seriff'] == 0
-        ].index.to_list()
+    def unknown_seriff(self):
+        return self.knowledge.query('alive and seriff == 0').index.to_list()
 
-    def target_for_vote(self):
-        return random.choice(self.exact_citizens)
+    def target_for_vote(self, candidates):
+        lvl1_candidates = list(set(candidates).intersection(self.exact_citizens))
+        if len(lvl1_candidates) > 0:
+            return random.choice(lvl1_candidates)
+        else:
+            return random.choice(candidates)
 
     def target_for_shot(self):
-        if isinstance(target, int):
-            target = self.table[target]
-        if len(self.exact_serif) > 0:
-            return self.exact_serif
+        if self.seriff > 0:
+            return self.seriff
+        elif len(self.unknown_seriff) > 0:
+            return random.choice(self.unknown_seriff)
         else:
             return random.choice(self.exact_citizens)
 
+    def shot(self, target):
+        target.alive = False
+        return target
+
+    def delegate_shooting(self, target):
+        target.shot_assigner = True
+        self.shot_assigner = False
+        
 
 class SeriffPlayer(Player):
     def __init__(self, id):
@@ -96,12 +104,10 @@ class SeriffPlayer(Player):
         self.knowledge.loc[self.id, 'seriff'] = 1
         self.knowledge.loc[self.id, 'color'] = 1
 
-    def pick_verify(self):
+    def target_fot_check(self):
         return random.choice(self.unknown_players)
 
     def check(self, target) -> int:
-        if isinstance(target, int):
-            target = self.table[target]
         if self.found_all_mafia_flag:
             return None
         if isinstance(target, MafiaPlayer):
@@ -123,13 +129,12 @@ class DonPlayer(MafiaPlayer):
         super().__init__(id)
         self.serif_id = 0
         self.role = 'Дон'
+        self.shot_assigner = True
 
-    def pick_verify(self):
-        return random.choice(self.unknown_citizen)
+    def target_for_check(self):
+        return random.choice(self.unknown_seriff)
 
     def check(self, target) -> int:
-        if isinstance(target, int):
-            target = self.table[target]
         if self.serif_id > 0:
             return
         if isinstance(target, SeriffPlayer):
@@ -141,87 +146,186 @@ class DonPlayer(MafiaPlayer):
             self.knowledge.loc[target.id, 'seriff'] = -1
         return False
 
-    def shoose_victim(self, game_state):
-        if self.serif_id == 0:
-            target = random.choice(game_state.citizen_players)
-            return target.id
-        else:
-            return self.serif_id
 
-
-class GameState:
-    days_count = 0
+class Table:
     roles = [MafiaPlayer] * 2 + [DonPlayer] + [Player] * 6 + [SeriffPlayer]
     random.shuffle(roles)
-    players = pd.Series(
-        index=range(1, 11),
-        data=[None]*10
-    )
-    for i in players.index:
-        players[i] = roles[i - 1](i)
-    info_table = pd.DataFrame(
-        index=range(1, 11),
-        data = {
-            'color': map(lambda x : -1 if isinstance(x, MafiaPlayer) else 1, players),
-            'seriff': map(lambda x : 1 if isinstance(x, SeriffPlayer) else -1, players)
-        }
-    )
-        
     def __init__(self):
-        self.days_count += 1
-        self.day = self.days_count
-        if self.day == 1:
-            Player.table = self.players
-            for i in self.players:
-                if isinstance(i, MafiaPlayer):
-                    i.knowledge['color'] = self.info_table['color']
-    
-    @property
+        self.players = pd.Series(
+            index=range(1, 11),
+            data=[None]*10
+        )
+        for i in self.players.index:
+            self.players[i] = self.roles[i - 1](i)
+        self.info_table = pd.DataFrame(
+            index=range(1, 11),
+            data = {
+                'color': map(lambda x : -1 if isinstance(x, MafiaPlayer) else 1, self.players),
+                'seriff': map(lambda x : 1 if isinstance(x, SeriffPlayer) else -1, self.players),
+                'alive': [True] * 10
+            }
+        )
+        for i in self.players:
+            if isinstance(i, MafiaPlayer):
+                i.knowledge['color'] = self.info_table['color']
+
     def alive_players(self):
         return [p for p in self.players if p.alive]
 
-    @property
     def alive_players_id(self):
         return [p.id for p in self.players if p.alive]
 
-    @property
-    def alive_count(self):
-        return len(self.alive_players)
+    def mafia_players(self, alive_flag):
+        return [
+            p for p in self.alive_players()
+            if type(p) in (MafiaPlayer, DonPlayer)
+            and (alive_flag or p.alive)]
 
-    @property
-    def mafia_players(self):
-        return [p for p in self.alive_players if type(p) in (MafiaPlayer, DonPlayer)]
+    def mafia_players_id(self, alive_flag):
+        return [
+            p.id for p in self.alive_players()
+            if type (p) in (MafiaPlayer, DonPlayer)
+            and (alive_flag or p.alive)
+        ]
 
-    @property
-    def mafia_players_id(self):
-        return [p.id for p in self.alive_players if type(p) in (MafiaPlayer, DonPlayer)]
+    def citizen_players(self, alive_flag):
+        return [
+            p for p in self.alive_players()
+            if type(p) not in [MafiaPlayer, DonPlayer]
+            and (alive_flag or p.alive)
+        ]
 
-    @property
-    def citizen_players(self):
-        return [p for p in self.alive_players if type(p) not in [MafiaPlayer, DonPlayer]]
+    def citizen_players_id(self, alive_flag):
+        return [
+            p.id for p in self.alive_players()
+            if type(p) not in [MafiaPlayer, DonPlayer]
+            and (alive_flag or p.alive)
+        ]
 
-    @property
-    def citizen_players_id(self):
-        return [p.id for p in self.alive_players if type(p) not in [MafiaPlayer, DonPlayer]]
+    def don(self, alive_flag):
+        return [
+            p for p in self.alive_players() if isinstance(p, DonPlayer)
+            and (alive_flag or p.alive)][0]
 
-    @property
-    def don(self):
-        return [p for p in self.alive_players if isinstance(p, DonPlayer)][0]
+    def don_id(self, alive_flag):
+        return [p.id for p in self.alive_players() if isinstance(p, DonPlayer)
+                and (alive_flag or p.alive)][0]
 
-    @property
-    def don_id(self):
-        return [p.id for p in self.alive_players if isinstance(p, DonPlayer)][0]
+    def seriff(self, alive_flag):
+        return [p for p in self.alive_players() if isinstance(p, SeriffPlayer)
+                and (alive_flag or p.alive)][0]
 
-    @property
-    def seriff(self):
-        return [p for p in self.alive_players if isinstance(p, SeriffPlayer)][0]
+    def seriff_id(self, alive_flag):
+        return [p.id for p in self.alive_players() if isinstance(p, SeriffPlayer)
+                and (alive_flag or p.alive)][0]
 
-    @property
-    def seriff_id(self):
-        return [p.id for p in self.alive_players if isinstance(p, SeriffPlayer)][0]
+class Game:
+    def __init__(self):
+        self.table = Table()
+
+
+    def day_voting(self):
+        result = self.voting_process()
+        if not result[1]:
+            result = self.voting_process(candidates=result[0], second_round=True)
+        if len(result[0]) == 1:
+            print('В результате голосования выбывает игрок ' + str(result[0][0]))
+        elif len(result[0]) == 0:
+            print('В результате голосования никто не покидает стол')
+        else:
+            print('В результате голосования выбывают игроки: ' + ','.join(result[0]))
+        self.actualize_info('alive')
+
+    def night_shooting(self):
+        for p in self.table.mafia_players(alive_flag=True):
+            if p.shot_assigner:
+                victim = p.shot(self.table.players[p.target_for_shot()])
+                self.table.info_table.loc[victim.id, 'alive'] = False
+                print('Этой ночтю был застрелян игрок ' + str(victim))
+        return victim.id
+
+    def seriff_check(self):
+        self.seriff.check(self.seriff.pick_verify())
+
+    def don_check(self):
+        self.don.check(self.don.pick_verify())
+
+    def morning(self):
+        self.actualize_info('alive')
+
+    def actualize_info(self, param):
+        for p in self.table.players:
+            p.knowledge[param] = self.table.info_table[param]
+
+class Election:
+    def __init__(self, table: Table, re_election=False):
+        self.candidates = table.alive_players()
+        self.candidates_id = table.alive_players_id()
+        self.re_election = re_election
+        self.election_list = pd.DataFrame(
+            index=self.candidates_id,
+            columns=[
+                'votes_for',
+                'votes_recieved',
+                'players_voted'
+            ]
+        )
+        self.election_list['votes_for'] = 0
+        self.election_list['votes_recieved'] = 0
+        self.election_list['players_voted'] = []
+        self.election_list.dtypes = {
+            'votes_for': 'Int64',
+            'votes_recieved' : 'Int64'
+        }
+        self.election_history = ''
+
+    def message_to_history(self, event, players):
+        if self.election_history != '':
+            self.election_history += '\n'
+        players = ','.join(str(p) for p in players)
+        match event:
+            case 'declare':
+                self.election_history += (
+                    'Объявлено голосование между игроками ' + players)
+
+    def voting_process(self):
+        self.election_history('declare', self.candidates)
+        for p in self.candidates:
+            p.vote(p.target_for_vote(self.candidates_id), self.election_list)
+            
+        max_votes = self.election_list['votes_recieved'].max()
+        leaders = self.election_list.query('votes_recieved == @max_votes')\
+            .index.to_list()
+        if len(leaders) == 1:
+            self.table.players[leaders[0]].alive = False
+            print('На голосовании единогласно был выбран игрок ' + str(leaders[0]))
+            return leaders, True # True означает, что голосование проведено 
+        else:
+            print('Голоса поделились между игроками ' + ','.join(str(l) for l in leaders))
+            if second_round:
+                if random.random() > 0.5:
+                    for l in leaders:
+                        l.alive = False
+                        print('Большинство игроков проголосовало за подъем ')
+                    return leaders, True
+                else:
+                    print('Большинство игроков проголосовало за оставление ')
+                return [], True
+            else:
+                print('Будет объявлено переголосование')
+                return leaders, False
+
+
 
 if __name__=='__main__':
     print('Добро пожаловать в интеллектуально-психологическую игру "Мафия"')
-    g1 = GameState()
-    print(g1.players)
+    g = Game()
+    print(g.table.players)
+    g.day_voting()
     pass
+'''
+Проблема при голосовании
+Проголосовавший игрок попадает в vote_Table с votes_recieved = Nan
+Далее, так как он там, то он становится целью для следующих голосований
+Решение - передавать в target_for_vote только кандидатов
+'''
