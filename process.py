@@ -1,84 +1,10 @@
-from roles import Player, MafiaPlayer, DonPlayer, SeriffPlayer
+from roles import Citizen, Mafia, Don, Sheriff
 import random
 import pandas as pd
 
-class Table:
-    roles = [MafiaPlayer] * 2 + [DonPlayer] + [Player] * 6 + [SeriffPlayer]
-    random.shuffle(roles)
-    def __init__(self):
-        self.players = pd.Series(
-            index=range(1, 11),
-            data=[None]*10
-        )
-        for i in self.players.index:
-            self.players[i] = self.roles[i - 1](i)
-        self.info_table = pd.DataFrame(
-            index=range(1, 11),
-            data = {
-                'color': map(lambda x : -1 if isinstance(x, MafiaPlayer) else 1, self.players),
-                'seriff': map(lambda x : 1 if isinstance(x, SeriffPlayer) else -1, self.players),
-                'alive': [True] * 10
-            }
-        )
-        for i in self.players:
-            if isinstance(i, MafiaPlayer):
-                i.knowledge['color'] = self.info_table['color']
 
-    def alive_players(self):
-        return [p for p in self.players if p.alive]
-
-    def alive_players_id(self):
-        return [p.id for p in self.players if p.alive]
-
-    def mafia_players(self, alive_flag):
-        return [
-            p for p in self.alive_players()
-            if type(p) in (MafiaPlayer, DonPlayer)
-            and (alive_flag or p.alive)]
-
-    def mafia_players_id(self, alive_flag):
-        return [
-            p.id for p in self.alive_players()
-            if type (p) in (MafiaPlayer, DonPlayer)
-            and (alive_flag or p.alive)
-        ]
-
-    def citizen_players(self, alive_flag):
-        return [
-            p for p in self.alive_players()
-            if type(p) not in [MafiaPlayer, DonPlayer]
-            and (alive_flag or p.alive)
-        ]
-
-    def citizen_players_id(self, alive_flag):
-        return [
-            p.id for p in self.alive_players()
-            if type(p) not in [MafiaPlayer, DonPlayer]
-            and (alive_flag or p.alive)
-        ]
-
-    def don(self, alive_flag):
-        return [
-            p for p in self.alive_players() if isinstance(p, DonPlayer)
-            and (alive_flag or p.alive)][0]
-
-    def don_id(self, alive_flag):
-        return [p.id for p in self.alive_players() if isinstance(p, DonPlayer)
-                and (alive_flag or p.alive)][0]
-
-    def seriff(self, alive_flag):
-        return [p for p in self.alive_players() if isinstance(p, SeriffPlayer)
-                and (alive_flag or p.alive)][0]
-
-    def seriff_id(self, alive_flag):
-        return [p.id for p in self.alive_players() if isinstance(p, SeriffPlayer)
-                and (alive_flag or p.alive)][0]
-
-
+'''
 class Election:
-    '''
-    Класс для голосования
-    '''
     def __init__(self, candidates, re_election=False):
         self.candidates = candidates
         self.candidates_id = (c.id for c in candidates)
@@ -169,72 +95,118 @@ class Election:
                 return [], True
             else:
                 return leaders_id, False
+                '''
 
 
 class Game:
+    roles = [Mafia] * 2 + [Don] + [Citizen] * 6 + [Sheriff]
     def __init__(self):
-        self.table = Table()
-        self.elections = {}
-        self.day = 0
-        self.election_id = 0
+        self.roles_random = self.roles.copy()
+        random.shuffle(self.roles_random)
+        self.game_log = 'Добро пожаловать в интеллектуально'\
+            '-психологическую игру Мафия!'
+        self.players = pd.Series(
+            index=range(1, 11),
+            data=None
+        ).astype('object')
+        for i in self.players.index:
+            self.players[i] = self.roles_random[i - 1](i)
+        self.table = pd.DataFrame(
+            index=range(1, 11),
+            data = {
+                'color': map(lambda x : -1 if isinstance(x, Mafia) else 1, self.players),
+                'seriff': map(lambda x : 1 if isinstance(x, Sheriff) else -1, self.players),
+                'role': map(lambda x : x.role, self.players),
+                'alive': [True] * 10
+            }
+        )
+        self.log('roles')
+        for i in self.players:
+            if isinstance(i, Mafia):
+                i.knowledge['color'] = self.table['color']
+        self.log('mafia_talk')
+        self.log('sheriff_sign')
 
-    @property
-    def day_str(self):
-        return f'День {str(self.day)}'
+    def get_players(self, color=None, role=None, alive=None, type_result=None):
+        result = self.players.copy()
+        if color is not None:
+            result = self.players[self.table['color']==color]
+        if role is not None:
+            result = self.players[self.table['role']==role]
+        if alive is not None:
+            result = self.players[self.table['alive']==alive]
+        match type_result:
+            case 'obj':
+                return result
+            case 'int':
+                return [p.id for p in result]
+            case 'str':
+                return ' '.join([str(p.id).ljust(2) for p in result])
 
-    @property
-    def election_num_str(self):
-        return f'голосование {str(self.election)}'
+    # ведение лога игры
+    def log(self, event, object1=None, object2=None):
+        self.game_log += '\n'
+        match event:
+            case 'roles':
+                self.game_log += f'Карты розданы, в игре у иргоков следующие роли:\n{self.table}'
+            case 'mafia_talk':
+                self.game_log += 'Мафия знакомится, черная команда : ' + \
+                    self.get_players(color=-1, type_result='str') +\
+                    ', дон игры - ' + self.get_players(role='Дон', type_result='str')
+            case 'sheriff_sign':
+                self.game_log += 'Шериф игры - ' + self.get_players(role='Шериф',
+                    type_result='str')
+                    
 
-    @property
-    def day_election(self):
-        return self.day_str + ' ' + self.election_num_str
+    # ночной отстрел
+    def hunt(self):
+        pass
 
-    def election(self, re_election=False):
-        self.election_id += 1
-        self.elections[self.day_election] = Election(table=self.table, re_election=re_election)
-        result = self.voting_process()
-        if not result[1]:
-            result = self.voting_process(candidates=result[0], second_round=True)
-        if len(result[0]) == 1:
-            print('В результате голосования выбывает игрок ' + str(result[0][0]))
-        elif len(result[0]) == 0:
-            print('В результате голосования никто не покидает стол')
-        else:
-            print('В результате голосования выбывают игроки: ' + ','.join(result[0]))
-        self.actualize_info('alive')
-
-    def night_shooting(self):
-        for p in self.table.mafia_players(alive_flag=True):
-            if p.shot_assigner:
-                victim = p.shot(self.table.players[p.target_for_shot()])
-                self.table.info_table.loc[victim.id, 'alive'] = False
-                print('Этой ночтю был застрелян игрок ' + str(victim))
-        return victim.id
-
-    def seriff_check(self):
-        self.seriff.check(self.seriff.pick_verify())
-
+    # проверка дона
     def don_check(self):
-        self.don.check(self.don.pick_verify())
+        pass
 
-    def morning(self):
-        self.actualize_info('alive')
+    # проверка шерифа
+    def sheriff_cjeck(self):
+        pass
 
-    def actualize_info(self, param):
-        for p in self.table.players:
-            p.knowledge[param] = self.table.info_table[param]
+    # актуализация знаний жителей
+    def update_knowledge(self):
+        pass
 
+    # голосование
+    def election(self, re_election=False):
+        pass
+
+    # проверка условия победы
+    def check_win(self):
+        pass
+    
+    def start_game(self):
+        for i in range(20):
+            self.log(event='night') # ночь
+            self.hunt()
+            match self.check_win():
+                case 1:
+                    self.log(event='city won')
+                    break
+                case -1:
+                    self.log(event='mafia won')
+            self.don_check()
+            self.sheriff_check()
+            self.update_knowledge()
+            e = self.election()
+            if len(e) > 1:
+                self.election(re_election=True)
+            self.update_knowledge()
+            match self.check_win():
+                case 1:
+                    self.log(event='city won')
+                    break
+                case -1:
+                    self.log(event='mafia won')
 
 if __name__=='__main__':
-    print('Добро пожаловать в интеллектуально-психологическую игру "Мафия"')
-    g = Game()
-    print(g.table.players)
-    g.day_voting()
-    pass
-'''
-Проблема при голосовании
-Проголосовавший игрок попадает в election_list с votes_recieved = Nan
-Далее, так как он там, то он становится целью для следующих голосований
-Решение - передавать в target_for_vote только кандидатов
-'''
+    g1 = Game()
+    print(g1.game_log)
+    
