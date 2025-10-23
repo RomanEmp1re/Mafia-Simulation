@@ -3,6 +3,13 @@ import random
 import pandas as pd
 
 
+ALIVE = 1
+BLACK = -1
+RED = 1
+UNKNOWN = 0
+YES = 1
+NO = - 1
+
 '''
 class Election:
     def __init__(self, candidates, re_election=False):
@@ -111,15 +118,7 @@ class Game:
         ).astype('object')
         for i in self.players.index:
             self.players[i] = self.roles_random[i - 1](i)
-        self.table = pd.DataFrame(
-            index=range(1, 11),
-            data = {
-                'color': map(lambda x : -1 if isinstance(x, Mafia) else 1, self.players),
-                'seriff': map(lambda x : 1 if isinstance(x, Sheriff) else -1, self.players),
-                'role': map(lambda x : x.role, self.players),
-                'alive': [True] * 10
-            }
-        )
+        self.update_table()
         self.log('roles')
         for i in self.players:
             if isinstance(i, Mafia):
@@ -127,14 +126,26 @@ class Game:
         self.log('mafia_talk')
         self.log('sheriff_sign')
 
-    def get_players(self, color=None, role=None, alive=None, type_result=None):
+    def update_table(self):
+        self.table = pd.DataFrame(
+            index=range(1, 11),
+            data = {
+                'color': map(lambda x : BLACK if isinstance(x, Mafia) else RED, self.players),
+                'seriff': map(lambda x : YES if isinstance(x, Sheriff) else NO, self.players),
+                'role': map(lambda x : x.role, self.players),
+                'alive': map(lambda x : YES if x.alive else NO, self.players)
+            }
+        )
+
+
+    def get_players(self, color=None, role=None, alive=None, type_result='obj'):
         result = self.players.copy()
         if color is not None:
-            result = self.players[self.table['color']==color]
+            result = result[self.table['color']==color]
         if role is not None:
-            result = self.players[self.table['role']==role]
+            result = result[self.table['role']==role]
         if alive is not None:
-            result = self.players[self.table['alive']==alive]
+            result = result[self.table['alive']==alive]
         match type_result:
             case 'obj':
                 return result
@@ -208,5 +219,12 @@ class Game:
 
 if __name__=='__main__':
     g1 = Game()
-    print(g1.game_log)
+    print(g1.players)
+    g1.players[4].alive = False
+    g1.players[5].alive = False
+    g1.players[6].alive = False
+    g1.players[7].alive = False
+    g1.update_table()
+    print(g1.table)
+    print(g1.get_players(color=-1, alive=1, type_result='str'))
     
