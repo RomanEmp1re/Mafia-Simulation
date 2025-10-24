@@ -31,77 +31,18 @@ class Election:
             'votes_for': 'Int64',
             'votes_recieved' : 'Int64'
         }
-        self.election_log = ''
+        self.game_log = ''
 
     def log(self, event, players=None, victim=None):
-        if self.election_log != '':
-            self.election_log += '\n'
+        if self.game_log != '':
+            self.game_log += '\n'
         if players:
             players = ' '.join(str(p).ljust(2) for p in players)
         if victim:
             victim = str(victim)
         match event:
-            case 'declare':
-                self.election_log += (
-                    f'Объявлено голосование между игроками {players}')
-            case 'vote':
-                self.election_log += (
-                    f'  За игрока {victim.ljust(2)} проголосовали игроки {players}')
-            case 'leader':
-                self.election_log += (
-                    f'  Лидером голосования стал игрок {victim}'
-                )
-            case 'share':
-                self.election_log += (
-                    f'  Голоса разделились поровну между игроками {players}'
-                )
-            case 'mass':
-                self.election_log += (
-                    f'  Ставится вопрос о подъеме игроков {players}'
-                )
-            case 'lift':
-                self.election_log += (
-                    f'  Было принято решение о подъеме игроков {players}'
-                )
-            case 'leave':
-                self.election_log += (
-                    f'  Было принято решение оставить игроков {players}'
-                )
-            case 'reelection':
-                self.election_log += (
-                    f'Объявлено переголосование между игроками {players}'
-                )
 
     def election_process(self, candidates):
-        if self.re_election:
-            self.log(event='reelection', candidates=self.candidates)
-        else:
-            self.log(event='declare', candidates=self.candidates)
-        for p in self.candidates:
-            p.vote(p.target_for_vote(self.candidates_id), self.election_list)
-        for p in self.election_list.query('votes_recieved > 0').iterrows():
-            self.log(event='vote', players=p['voted_by'])
-        max_votes = self.election_list['votes_recieved'].max()
-        leaders_id = self.election_list.query('votes_recieved == @max_votes')
-        if len(leaders_id) == 1:
-            victim = leaders_id[0]
-            self.table.players[victim].alive = False
-            self.log('leader', victim=victim)
-            return leaders_id, True # True означает, что голосование проведено 
-        else:
-            self.log('share', players=leaders_id)
-            if self.re_election:
-                self.log('mass', players=leaders_id)
-                if random.random() > 0.5:
-                    for l in leaders_id:
-                        l.alive = False
-                        self.log('lift', players=leaders_id)
-                    return leaders_id, True
-                else:
-                    self.log('leave', players=leaders_id)
-                return [], True
-            else:
-                return leaders_id, False
                 '''
 
 
@@ -156,21 +97,51 @@ class Game:
                 return ' '.join([str(p.id).ljust(2) for p in result])
 
     # ведение лога игры
-    def log(self, event, object1=None, object2=None):
+    def log(self, event, **kwargs):
         self.game_log += '\n'
         match event:
             case 'roles':
-                self.game_log += f'Карты розданы, в игре у иргоков следующие роли:\n{self.table}'
+                self.game_log += f'Карты розданы, в игре у игроков следующие роли:\n{self.table}'
             case 'mafia_talk':
-                self.game_log += 'Мафия знакомится, черная команда : ' + \
-                    self.get_players(color=-1, type_result='str') +\
-                    ', дон игры - ' + self.get_players(role='Дон', type_result='str')
+                self.game_log += (
+                    'Мафия знакомится, черная команда: ' +
+                    self.get_players(color=-1, type_result='str') +
+                    ', дон игры — ' + self.get_players(role='Дон', type_result='str')
+                )
             case 'sheriff_sign':
-                self.game_log += 'Шериф игры - ' + self.get_players(role='Шериф',
-                    type_result='str')
+                self.game_log += (
+                    'Шериф игры — ' +
+                    self.get_players(role='Шериф', type_result='str')
+                )
             case 'hunt':
-                self.game_log += 'Этой ночью был убит игрок ' + str(object1)
-                    
+                victim = kwargs['victim']
+                self.game_log += f'Этой ночью был убит игрок {victim}'
+            # === ГОЛОСОВАНИЕ ===
+            case 'declare_election':
+                players = ' '.join(str(i) for i in kwargs['players'])
+                self.game_log += f'\nОбъявлено голосование между игроками {players}'
+            case 'vote':
+                players = ' '.join([str(p) for p in kwargs['players']])
+                victim = str(kwargs['victim'])
+                self.game_log += f'\n  За игрока {victim} проголосовали игроки {players}'
+            case 'leader':
+                victim = str(kwargs['victim'])
+                self.game_log += f'\n  Лидером голосования стал игрок {victim}'
+            case 'share':
+                players = ' '.join(str(p) for p in kwargs['players'])
+                self.game_log += f'\n  Голоса разделились поровну между игроками {players}'
+            case 'mass':
+                players = ' '.join(str(p) for p in kwargs['players'])
+                self.game_log += f'\n  Ставится вопрос о подъеме игроков {players}'
+            case 'lift':
+                players = ' '.join(str(p) for p in kwargs['players'])
+                self.game_log += f'\n  Было принято решение о подъеме игроков {players}'
+            case 'leave':
+                players = ' '.join(str(p) for p in kwargs['players'])
+                self.game_log += f'\n  Было принято решение оставить игроков {players}'
+            case 'reelection':
+                players = ' '.join(str(p) for p in kwargs['candidates'])
+                self.game_log += f'\nОбъявлено переголосование между игроками {players}'  
 
     # ночной отстрел
     def hunt(self):
@@ -178,7 +149,7 @@ class Game:
             if m.shot_assigner:
                 target = m.shot()
                 self.players[target].alive = False
-                self.log(event='hunt', object1=target)
+                self.log(event='hunt', victim=target)
                 self.update_table()
                 break
 
@@ -196,8 +167,43 @@ class Game:
             p.knowledge['alive'] = self.table['alive']
 
     # голосование
-    def election(self, re_election=False):
-        pass
+    def election(self, candidates_id:list[int], re_election=False):
+        election_list = pd.DataFrame(
+            index=candidates_id, data={'voted_by': None, 'votes_recieved':0})
+        election_list['voted_by'].astype('object')
+        election_list['voted_by'] = [[] for _ in range(len(candidates_id))]
+        if re_election:
+            self.log(event='reelection', candidates=candidates_id)
+        else:
+            self.log(event='declare_election', players=candidates_id)
+        voters = self.get_players(alive=1)
+        for p in voters:
+            target = p.vote(candidates_id)
+            election_list.loc[target, 'voted_by'].append(p.id)
+            election_list.loc[target, 'votes_recieved'] += 1
+        for p in election_list.query('votes_recieved > 0').iterrows():
+            self.log(event='vote', players=p[1], victim=p[0])
+        max_votes = election_list['votes_recieved'].max()
+        leaders_id = election_list.query('votes_recieved == @max_votes').index.to_list()
+        if len(leaders_id) == 1: # когда был выбран один игрок
+            victim = leaders_id[0]
+            self.players[victim].alive = False
+            self.log('leader', victim=victim)
+            return [victim], True # True означает, что голосование проведено 
+        else: # выбрано несколько игроков на голосовании
+            self.log('share', players=leaders_id)
+            if re_election:
+                self.log('mass', players=leaders_id)
+                if random.random() > 0.5: # пока заглушка - поднять или оставить 50/50
+                    for l in leaders_id:
+                        self.players[leaders_id].alive = False
+                        self.log('lift', players=leaders_id)
+                    return leaders_id, True
+                else:
+                    self.log('leave', players=leaders_id)
+                return leaders_id, True
+            else:
+                return leaders_id, False
 
     # проверка условия победы
     def check_win(self):
@@ -230,9 +236,10 @@ class Game:
 if __name__=='__main__':
     g1 = Game()
     print(g1.players)
-    for i in range(6):
-        g1.hunt()
+    for i in range(3):
+        el = g1.election(g1.get_players(alive=1, type_result='int'))
+        if not el[1]:
+            g1.election(el[0], re_election=True)
+        g1.update_table()
         g1.update_knowledge()
-    print(g1.table) 
     print(g1.game_log)
-    print(g1.table)
