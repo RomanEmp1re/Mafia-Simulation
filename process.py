@@ -120,9 +120,10 @@ class Game:
             self.players[i] = self.roles_random[i - 1](i)
         self.update_table()
         self.log('roles')
-        for i in self.players:
-            if isinstance(i, Mafia):
-                i.knowledge['color'] = self.table['color']
+        for i in self.get_players(color=-1):
+            i.knowledge['color'] = self.table['color']
+            print(self.get_players(color=-1, type_result='int'))
+            i.knowledge.loc[list(i.get_players(color=-1)), 'sheriff'] = -1
         self.log('mafia_talk')
         self.log('sheriff_sign')
 
@@ -167,11 +168,19 @@ class Game:
             case 'sheriff_sign':
                 self.game_log += 'Шериф игры - ' + self.get_players(role='Шериф',
                     type_result='str')
+            case 'hunt':
+                self.game_log += 'Этой ночью был убит игрок ' + str(object1)
                     
 
     # ночной отстрел
     def hunt(self):
-        pass
+        for m in self.get_players(color=-1, alive=1):
+            if m.shot_assigner:
+                target = m.shot()
+                self.players[target].alive = False
+                self.log(event='hunt', object1=target)
+                self.update_table()
+                break
 
     # проверка дона
     def don_check(self):
@@ -183,7 +192,8 @@ class Game:
 
     # актуализация знаний жителей
     def update_knowledge(self):
-        pass
+        for p in self.players:
+            p.knowledge['alive'] = self.table['alive']
 
     # голосование
     def election(self, re_election=False):
@@ -220,11 +230,9 @@ class Game:
 if __name__=='__main__':
     g1 = Game()
     print(g1.players)
-    g1.players[4].alive = False
-    g1.players[5].alive = False
-    g1.players[6].alive = False
-    g1.players[7].alive = False
-    g1.update_table()
+    for i in range(6):
+        g1.hunt()
+        g1.update_knowledge()
+    print(g1.table) 
+    print(g1.game_log)
     print(g1.table)
-    print(g1.get_players(color=-1, alive=1, type_result='str'))
-    

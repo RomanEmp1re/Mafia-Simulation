@@ -135,3 +135,12 @@ class Don(Mafia):
         if len(result) > 0:
             return random.choice(result)
         return random.choice(self.get_players(sheriff=UNKNOWN))
+
+if __name__=='__main__':
+    p1 = Mafia(1)
+    p1.knowledge.loc[[2, 3], ['color', 'sheriff']] = [-1, -1]
+    p1.knowledge.loc[4:10, ['color', 'sheriff']] = [1, 0]
+    stest = set()
+    for i in range(50):
+        stest.add(p1.shot())
+    print(stest)
