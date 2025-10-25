@@ -150,6 +150,11 @@ class Game:
     def update_knowledge(self):
         for p in self.players:
             p.knowledge['alive'] = self.table['alive']
+        # Если дон погиб, обязанности по отстрелу передаюся на любую из оставшихся мафий
+        if not self.get_players(role='Don').iat[0].alive:
+            inherits_power = random.choice(self.get_players(role='Mafia', \
+            alive=-1, type_result='int'))
+            self.players[inherits_power].shot_assigner = True
 
     # голосование
     def election(self, candidates_id:list[int], re_election=False):
