@@ -81,7 +81,7 @@ class Sheriff(Citizen):
             return 0 # когда миссия зевершена
         if len(self.get_players(color=BLACK)) == 3:
             self.mission_completed = True
-            self.knowledge['color'].replace(UNKNOWN, RED, inplace=True)
+            self.knowledge['color'] = self.knowledge['color'].replace(UNKNOWN, RED)
             return 0
         if len(self.get_players(color=RED)) == 6:
             self.mission_completed = True
@@ -129,7 +129,7 @@ class Don(Mafia):
             return 0
         if self.get_players(sheriff=YES):
             self.mission_completed = True
-            self.knowledge['sheriff'].replace(UNKNOWN, NO, inplace=True)
+            self.knowledge['sheriff'] = self.knowledge['sheriff'].replace(UNKNOWN, NO)
             return 0
         result = self.get_players(alive=YES, sheriff=UNKNOWN)
         if len(result) > 0:

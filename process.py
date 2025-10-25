@@ -123,10 +123,9 @@ class Game:
         for m in self.get_players(color=-1, alive=1):
             if m.shot_assigner:
                 target = m.shot()
-                self.players[target].alive = False
+                self.kill_player(target)
                 self.log(event='hunt', victim=target)
-                self.update_table()
-                break
+                return target
 
     # проверка дона
     def don_check(self):
@@ -151,10 +150,22 @@ class Game:
         for p in self.players:
             p.knowledge['alive'] = self.table['alive']
         # Если дон погиб, обязанности по отстрелу передаюся на любую из оставшихся мафий
-        if not self.get_players(role='Don').iat[0].alive:
-            inherits_power = random.choice(self.get_players(role='Mafia', \
-            alive=-1, type_result='int'))
-            self.players[inherits_power].shot_assigner = True
+
+    def kill_player(self, id):
+        try:
+            self.players[id].alive = False
+            self.update_table()
+        except:
+            print(id)
+            print(self.table)
+        # передача обязанностей по назначению отстрела
+        if self.players[id].role in ('Mafia', 'Don'):
+            if self.players[id].shot_assigner:
+                mafia_list = self.get_players(role='Mafia', alive=1, type_result='int')
+                mafia_list = [m for m in mafia_list if m != id]
+                if mafia_list:
+                    inherits_power = random.choice(mafia_list)
+                    self.players[inherits_power].shot_assigner = True
 
     # голосование
     def election(self, candidates_id:list[int], re_election=False):
@@ -177,7 +188,7 @@ class Game:
         leaders_id = election_list.query('votes_recieved == @max_votes').index.to_list()
         if len(leaders_id) == 1: # когда был выбран один игрок
             victim = leaders_id[0]
-            self.players[victim].alive = False
+            self.kill_player(victim)
             self.log('leader', victim=victim)
             return [victim], True # True означает, что голосование проведено 
         else: # выбрано несколько игроков на голосовании
@@ -186,8 +197,8 @@ class Game:
                 self.log('mass', players=leaders_id)
                 if random.random() > 0.5: # пока заглушка - поднять или оставить 50/50
                     for l in leaders_id:
-                        self.players[leaders_id].alive = False
-                        self.log('lift', players=leaders_id)
+                        self.kill_player(l)
+                    self.log('lift', players=leaders_id)
                     return leaders_id, True
                 else:
                     self.log('leave', players=leaders_id)
@@ -200,31 +211,37 @@ class Game:
         if self.get_players(color=-1, alive=1).count() >= self.get_players(
             color=1, alive=1).count():
             self.log('mafia_won')
-            return True
+            return -1
         elif self.get_players(color=-1, alive=1).count() == 0:
             self.log('city_won')
-            return True
-        return False
+            return 1
+        return 0
     
     def start_game(self):
         for i in range(20):
             self.log(event='night') # ночь
-            self.hunt()
-            if self.check_win():
-                break
-            self.don_check()
-            self.sheriff_check()
-            self.update_table()
+            shot_target = self.hunt() # ночной отстрел
+            win = self.check_win() # проверка условия победы
+            if win:
+                return win
+            self.don_check() # проверка дона
+            self.sheriff_check() # проверка шерифа
+            self.kill_player(shot_target)
             self.update_knowledge()
             e = self.election(self.get_players(alive=1, type_result='int'))
             if not e[1]:
                 self.election(re_election=True, candidates_id=e[0])
-            self.update_table()
             self.update_knowledge()
-            if self.check_win():
-                break
+            win = self.check_win()
+            if win:
+                return win
 
 if __name__=='__main__':
-    g1 = Game()
-    g1.start_game()
-    print(g1.game_log)
+    results = []
+    for i in range(800):
+        g1 = Game()
+        i = g1.start_game()
+        results.append(i)
+        print(f'\rВыполнено на {len(results)} %', end = '')
+    print('Побед мирных' + str(len([i for i in results if i == 1])))
+    print('Побед мафии' + str(len([i for i in results if i == -1])))
