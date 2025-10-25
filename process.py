@@ -10,41 +10,6 @@ UNKNOWN = 0
 YES = 1
 NO = - 1
 
-'''
-class Election:
-    def __init__(self, candidates, re_election=False):
-        self.candidates = candidates
-        self.candidates_id = (c.id for c in candidates)
-        self.re_election = re_election
-        self.election_list = pd.DataFrame(
-            index=self.candidates_id,
-            columns=[
-                'votes_for',
-                'votes_recieved',
-                'voted_by'
-            ]
-        )
-        self.election_list['votes_for'] = 0
-        self.election_list['votes_recieved'] = 0
-        self.election_list['players_voted'] = []
-        self.election_list.dtypes = {
-            'votes_for': 'Int64',
-            'votes_recieved' : 'Int64'
-        }
-        self.game_log = ''
-
-    def log(self, event, players=None, victim=None):
-        if self.game_log != '':
-            self.game_log += '\n'
-        if players:
-            players = ' '.join(str(p).ljust(2) for p in players)
-        if victim:
-            victim = str(victim)
-        match event:
-
-    def election_process(self, candidates):
-                '''
-
 
 class Game:
     roles = [Mafia] * 2 + [Don] + [Citizen] * 6 + [Sheriff]
@@ -63,7 +28,6 @@ class Game:
         self.log('roles')
         for i in self.get_players(color=-1):
             i.knowledge['color'] = self.table['color']
-            print(self.get_players(color=-1, type_result='int'))
             i.knowledge.loc[list(i.get_players(color=-1)), 'sheriff'] = -1
         self.log('mafia_talk')
         self.log('sheriff_sign')
@@ -73,12 +37,11 @@ class Game:
             index=range(1, 11),
             data = {
                 'color': map(lambda x : BLACK if isinstance(x, Mafia) else RED, self.players),
-                'seriff': map(lambda x : YES if isinstance(x, Sheriff) else NO, self.players),
+                'sheriff': map(lambda x : YES if isinstance(x, Sheriff) else NO, self.players),
                 'role': map(lambda x : x.role, self.players),
                 'alive': map(lambda x : YES if x.alive else NO, self.players)
             }
         )
-
 
     def get_players(self, color=None, role=None, alive=None, type_result='obj'):
         result = self.players.copy()
@@ -106,12 +69,12 @@ class Game:
                 self.game_log += (
                     'Мафия знакомится, черная команда: ' +
                     self.get_players(color=-1, type_result='str') +
-                    ', дон игры — ' + self.get_players(role='Дон', type_result='str')
+                    ', дон игры — ' + self.get_players(role='Don', type_result='str')
                 )
             case 'sheriff_sign':
                 self.game_log += (
                     'Шериф игры — ' +
-                    self.get_players(role='Шериф', type_result='str')
+                    self.get_players(role='Sheriff', type_result='str')
                 )
             case 'hunt':
                 victim = kwargs['victim']
@@ -119,29 +82,41 @@ class Game:
             # === ГОЛОСОВАНИЕ ===
             case 'declare_election':
                 players = ' '.join(str(i) for i in kwargs['players'])
-                self.game_log += f'\nОбъявлено голосование между игроками {players}'
+                self.game_log += f'Объявлено голосование между игроками {players}'
             case 'vote':
                 players = ' '.join([str(p) for p in kwargs['players']])
                 victim = str(kwargs['victim'])
-                self.game_log += f'\n  За игрока {victim} проголосовали игроки {players}'
+                self.game_log += f'  За игрока {victim} проголосовали игроки {players}'
             case 'leader':
                 victim = str(kwargs['victim'])
-                self.game_log += f'\n  Лидером голосования стал игрок {victim}'
+                self.game_log += f'  Лидером голосования стал игрок {victim}'
             case 'share':
                 players = ' '.join(str(p) for p in kwargs['players'])
-                self.game_log += f'\n  Голоса разделились поровну между игроками {players}'
+                self.game_log += f'  Голоса разделились поровну между игроками {players}'
             case 'mass':
                 players = ' '.join(str(p) for p in kwargs['players'])
-                self.game_log += f'\n  Ставится вопрос о подъеме игроков {players}'
+                self.game_log += f'  Ставится вопрос о подъеме игроков {players}'
             case 'lift':
                 players = ' '.join(str(p) for p in kwargs['players'])
-                self.game_log += f'\n  Было принято решение о подъеме игроков {players}'
+                self.game_log += f'  Было принято решение о подъеме игроков {players}'
             case 'leave':
                 players = ' '.join(str(p) for p in kwargs['players'])
-                self.game_log += f'\n  Было принято решение оставить игроков {players}'
+                self.game_log += f'  Было принято решение оставить игроков {players}'
             case 'reelection':
                 players = ' '.join(str(p) for p in kwargs['candidates'])
-                self.game_log += f'\nОбъявлено переголосование между игроками {players}'  
+                self.game_log += f'Объявлено переголосование между игроками {players}'  
+            case 'don_check':
+                result = 'шериф' if kwargs['result'] == 1 else 'не шериф'
+                target = str(kwargs['target'])
+                self.game_log += f'Дон проверяет игрока {target}. Игрок {target} - {result}'
+            case 'sheriff_check':
+                result = 'красный' if kwargs['result'] == 1 else 'черный'
+                target = str(kwargs['target'])
+                self.game_log += f'Шериф проверяет игрока {target}. Игрок {target} - {result}'
+            case 'mafia_won':
+                self.game_log += 'Мафия выиграла!'
+            case 'city_won':
+                self.game_log += 'Выграл мирный город'
 
     # ночной отстрел
     def hunt(self):
@@ -155,11 +130,21 @@ class Game:
 
     # проверка дона
     def don_check(self):
-        pass
+        player = self.get_players(role='Don').iat[0]
+        target = player.check()
+        if target:
+            result = self.table.loc[target, 'sheriff']
+            player.knowledge.loc[target, 'sheriff'] = result
+            self.log('don_check', target=target, result=result)
 
     # проверка шерифа
-    def sheriff_cjeck(self):
-        pass
+    def sheriff_check(self):
+        player = self.get_players(role='Sheriff').iat[0]
+        target = player.check()
+        if target:
+            result = self.table.loc[target, 'color']
+            player.knowledge.loc[target, 'color'] = result
+            self.log('sheriff_check', target=target, result=result)
 
     # актуализация знаний жителей
     def update_knowledge(self):
@@ -207,39 +192,34 @@ class Game:
 
     # проверка условия победы
     def check_win(self):
-        pass
+        if self.get_players(color=-1, alive=1).count() >= self.get_players(
+            color=1, alive=1).count():
+            self.log('mafia_won')
+            return True
+        elif self.get_players(color=-1, alive=1).count() == 0:
+            self.log('city_won')
+            return True
+        return False
     
     def start_game(self):
         for i in range(20):
             self.log(event='night') # ночь
             self.hunt()
-            match self.check_win():
-                case 1:
-                    self.log(event='city won')
-                    break
-                case -1:
-                    self.log(event='mafia won')
+            if self.check_win():
+                break
             self.don_check()
             self.sheriff_check()
+            self.update_table()
             self.update_knowledge()
-            e = self.election()
-            if len(e) > 1:
-                self.election(re_election=True)
+            e = self.election(self.get_players(alive=1, type_result='int'))
+            if not e[1]:
+                self.election(re_election=True, candidates_id=e[0])
+            self.update_table()
             self.update_knowledge()
-            match self.check_win():
-                case 1:
-                    self.log(event='city won')
-                    break
-                case -1:
-                    self.log(event='mafia won')
+            if self.check_win():
+                break
 
 if __name__=='__main__':
     g1 = Game()
-    print(g1.players)
-    for i in range(3):
-        el = g1.election(g1.get_players(alive=1, type_result='int'))
-        if not el[1]:
-            g1.election(el[0], re_election=True)
-        g1.update_table()
-        g1.update_knowledge()
+    g1.start_game()
     print(g1.game_log)

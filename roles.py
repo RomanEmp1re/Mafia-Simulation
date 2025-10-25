@@ -24,7 +24,7 @@ class Player:
     def __init__(self, id:int):
         self.id = id
         self.alive = True
-        self.role = 'игрок'
+        self.role = 'player'
         self.knowledge = pd.DataFrame(
             index=range(1, 11),
             data={
@@ -54,7 +54,7 @@ class Player:
 class Citizen(Player):
     def __init__(self, id:int):
         super().__init__(id)
-        self.role='Мирный'
+        self.role='Citizen'
 
     def vote(self, candidates:list[int]) -> int:
         result = self.get_players(color=BLACK, players_id=candidates)
@@ -72,7 +72,7 @@ class Citizen(Player):
 class Sheriff(Citizen):
     def __init__(self, id:int):
         super().__init__(id)
-        self.role = 'Шериф'
+        self.role = 'Sheriff'
         self.mission_completed = False
         self.knowledge.loc[:, 'sheriff'] = -1
 
@@ -97,7 +97,7 @@ class Sheriff(Citizen):
 class Mafia(Player):
     def __init__(self, id):
         super().__init__(id)
-        self.role = 'Мафия'
+        self.role = 'Mafia'
         self.shot_assigner = False
 
     def vote(self, candidates:list[int]) -> int:
@@ -120,7 +120,7 @@ class Mafia(Player):
 class Don(Mafia):
     def __init__(self, id:int):
         super().__init__(id)
-        self.role = 'Дон'
+        self.role = 'Don'
         self.shot_assigner = True
         self.mission_completed = False
 
