@@ -148,7 +148,7 @@ class Game:
     # актуализация знаний жителей
     def update_knowledge(self):
         for p in self.players:
-            p.knowledge['alive'] = self.table['alive']
+            p.knowledge['alive'].update(self.table['alive'])
         # Если дон погиб, обязанности по отстрелу передаюся на любую из оставшихся мафий
 
     def kill_player(self, id):
@@ -237,11 +237,6 @@ class Game:
                 return win
 
 if __name__=='__main__':
-    results = []
-    for i in range(800):
-        g1 = Game()
-        i = g1.start_game()
-        results.append(i)
-        print(f'\rВыполнено на {len(results)} %', end = '')
-    print('Побед мирных' + str(len([i for i in results if i == 1])))
-    print('Побед мафии' + str(len([i for i in results if i == -1])))
+    g1 = Game()
+    i = g1.start_game()
+    print(g1.game_log)

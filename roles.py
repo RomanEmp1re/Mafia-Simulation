@@ -2,16 +2,6 @@ import random
 import pandas as pd
 from enum import IntEnum
 
-'''
-knowledge - параметр у каждого игрока, который определеяет его знания по поводу игроков
-это словарь с id игроков и параметрами их знаний и мнения
-id - идентификатор игрока от 1 до 10
-для мирных игроков:
-Постоянно распределяется таким образом, чтобы сумма не была больше 3.
-color - точный 100% цвет того или иного игрока. Если 1 - то красный, если -1 - то черный, если 0 - то неизвесный
-sheriff - точная информация что данный игрок является шерифом. Если 1 - то шериф, если -1 - то не шериф, если 0 - то неизвестно
-'''
-
 ALIVE = 1
 BLACK = -1
 RED = 1
@@ -136,11 +126,41 @@ class Don(Mafia):
             return random.choice(result)
         return random.choice(self.get_players(sheriff=UNKNOWN))
 
+class Knowledge:
+    total_suspection = 9
+    max_suspection = total_suspection / 3
+    min_suspction = 0
+    def __init__(self, player_id):
+        self.knowledge = pd.DataFrame(
+            index=list(range(1, 11)),
+            data={
+                'color':0, # точное знание о цвете игрока
+                'suspection':1, # коэффициент подозрения
+                'sheriff':0, # значение о шерифстве игрока
+                'vendetta':0, # (только для мафии) коэффициент неудобных мирных для мафии
+            }
+        )
+        self.knowledge = self.knowledge.astype({'color':'Int8', 'suspection':'float32',
+            'sheriff':'Int8', 'vendetta':'float32'})
+        self.knowledge.drop(index=player_id, inplace=True)
+    
+    def adjust_suspection(self, player_id, value):
+        control_group = self.knowledge[self.knowledge['color'] == 0]['suspection'].copy()
+        current_suspection = control_group[player_id]
+        if value >= 0:
+            real_value = min(value, self.max_suspection - current_suspection)
+        else:
+            real_value = max(value, -current_suspection - self.min_suspction)
+        control_group[player_id] += real_value
+        adjust_value = real_value / control_group.count()
+        control_group.loc[control_group.index != player_id] -= adjust_value
+        self.knowledge.update(control_group)
+
+
 if __name__=='__main__':
-    p1 = Mafia(1)
-    p1.knowledge.loc[[2, 3], ['color', 'sheriff']] = [-1, -1]
-    p1.knowledge.loc[4:10, ['color', 'sheriff']] = [1, 0]
-    stest = set()
-    for i in range(50):
-        stest.add(p1.shot())
-    print(stest)
+    s = Knowledge(1)
+    s.adjust_suspection(2, 3)
+    s.adjust_suspection(5, 3)
+    s.adjust_suspection(4, 3)
+    print(s.knowledge)
+    
