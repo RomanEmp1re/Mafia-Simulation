@@ -1,4 +1,5 @@
 import random
+import numpy as np
 import pandas as pd
 from enum import IntEnum
 
@@ -35,17 +36,24 @@ class Player:
         return f'Игрок #{self.id}, роль - {self.role}'
 
     def get_players(self, alive:int=None, color:int=None, sheriff:int=None,
-                    players_id:list[int]=None, sort=None):
+                    lock:int=None, players_id:list[int]=None):
         result = self.knowledge.copy()
         if alive is not None:
             result.query('alive == @alive', inplace=True)
-        if color:
-            sus = self.max_sus if color == BLACK else self.min_sus
-            result.query('suspection == @sus and lock == 1', inplace=True)
+        if color is not None:
+            match color:
+                case 0:
+                    self.knowledge.query('lock == 0', inplace=True)
+                case 1:
+                    self.knowledge.query('lock == 1 and suspection == 12')
+                case -1:
+                    self.knowledge.query('lock == 1 and suspection == 0')
         if sheriff is not None:
             result.query('sheriff == @sheriff', inplace=True)
         if players_id is not None:
             result.query('index in @players_id', inplace=True)
+        if lock is not None:
+            result.query('lock == @lock', inplace=True)
         return result.index.to_list()
 
     def get_target(self, players_id=None, by='suspection'):
@@ -53,6 +61,70 @@ class Player:
             players_id = self.knowledge.index.to_list()
         return self.knowledge.loc[players_id, by].idxmax()
 
+    def change_sus(self, index, value): 
+        if not isinstance(index, list):
+            index = [index]
+        changed_fact = 0
+        for i in index:
+            cur_sus = self.knowledge.loc[i, 'suspection']
+            if value > 0:
+                real_value = min(value, self.max_sus - cur_sus)
+            else:
+                real_value = max(value, -cur_sus)
+            self.knowledge.loc[i, 'suspection'] += np.float32(real_value)
+            changed_fact += np.float32(real_value)
+        self.round_sus()
+        return changed_fact
+
+    def share_sus(self, index, value):
+        if isinstance(index, int):
+            index = [index]
+        target_group = self.get_players(lock=0, players_id=index)
+        n_players = len(target_group)
+        if n_players == 0:
+            return 0
+        shared_sus = value / n_players
+        value -= self.change_sus(target_group, shared_sus)
+        self.round_sus()
+        return value
+
+    def suspect(self, index, value):
+        if isinstance(index, int):
+            index = [index]
+        align_group = self.knowledge\
+            .query('lock == 0 and index not in @index').index.to_list()
+        target_group = self.get_players(lock=0, players_id=index)
+        if abs(value) > 0:
+            rest_value = -self.change_sus(target_group, value)
+            while abs(rest_value) > 0.02:
+                rest_value = self.share_sus(align_group, rest_value)
+        self.round_sus()
+
+    def set_sus(self, index, value, lock=False):
+        if isinstance(index, int):
+            index = [index]
+        align_group = self.knowledge\
+            .query('lock == 0 and index not in @index').index.to_list()
+        rest_value = self.knowledge.loc[index, 'suspection'].sum() - len(index) * value
+        self.knowledge.loc[index, 'suspection'] = value
+        while abs(rest_value) > 0.02:
+            rest_value = self.share_sus(align_group, rest_value)
+        if lock:
+            self.knowledge.loc[index, 'lock'] = YES
+        self.round_sus()
+
+    def round_sus(self):
+        if self.knowledge.suspection.sum() < self.total_sus:
+            self.knowledge.suspection = np.ceil(self.knowledge.suspection * 100) / 100
+        if self.knowledge.suspection.sum() > self.total_sus:
+            self.knowledge.suspection = np.floor(self.knowledge.suspection * 100) / 100
+
+    def set_exact_color(self, index, color):
+        if isinstance(index, int):
+            index = [index]
+        value = self.max_sus if color == BLACK else RED
+        self.set_sus(index, value)
+        self.knowledge.loc[index, 'lock'] = YES
 
 class Citizen(Player):
     def __init__(self, id:int):
@@ -67,25 +139,22 @@ class Sheriff(Citizen):
         super().__init__(id)
         self.role = 'Sheriff'
         self.mission_completed = False
-        self.knowledge.loc[:, 'sheriff'] = -1
+        self.knowledge.loc[:, 'sheriff'] = NO
 
+# counting will be in special method
     def check(self) -> int:
         if self.mission_completed:
-            return 0 # когда миссия зевершена
-        if len(self.get_players(color=BLACK)) == 3:
-            self.mission_completed = True
-            self.knowledge['color'] = self.knowledge['color'].replace(UNKNOWN, RED)
             return 0
-        if len(self.get_players(color=RED)) == 6:
+        elif len(self.get_players(color=BLACK)) == 3:
+            self.mission_completed = True
+        elif len(self.get_players(color=RED)) == 6:
             self.mission_completed = True
             self.knowledge['color'].replace(UNKNOWN, RED, inplace=True)
-            return 0 # когда найдена вся мафия или все мирные
-        result = self.get_players(alive=YES, color=UNKNOWN)
-        if len(result) > 0:
-            return random.choice(result)
-        result = self.get_players(color=UNKNOWN)
-        return random.choice(result)
-
+        else:
+            return self.get_target(
+                players_id=self.get_players(alive=YES, color=UNKNOWN),
+                by='suspection')
+        return 0
 
 class Mafia(Player):
     def __init__(self, id):
@@ -131,9 +200,13 @@ class Don(Mafia):
 
 
 if __name__== '__main__':
-    p = Citizen(10)
-    p.knowledge.loc[5, ['suspection', 'lock']] = [1, 1]
-    p.knowledge.loc[3, ['suspection', 'lock']] = [5, 1]
-    p.knowledge.loc[1, ['suspection', 'lock']] = [6, 1]
-    p.knowledge.loc[2, ['suspection', 'lock']] = [7, 1]
-    print(p.vote(candidates=[2, 3, 4, 5, 6, 7]))
+    p = Sheriff(10)
+    p.suspect([1, 3, 4], 4)
+    p.suspect([8, 9], 6)
+    p.suspect([3, 1], -5)
+    p.suspect([9], -5)
+    p.suspect([5], 4)
+    p.suspect([3], 3)
+    print(p.knowledge)
+    print(p.knowledge.suspection.sum())
+    print(p.check())
