@@ -6,8 +6,13 @@ from enum import IntEnum
 UNKNOWN = 0
 YES = 1
 NO = -1
+# color
 RED = 1
 BLACK = -1
+# qiut_reason
+KILLED = 2
+JAILED = 1
+ALIVE=0
 
 class Player:
     total_sus = 36
@@ -22,38 +27,45 @@ class Player:
             index=list(range(1, 11)),
             data={
                 'suspection':self.base_sus, # коэффициент подозрения
-                'sheriff':0, # значение о шерифстве игрока
+                'sheriff':UNKNOWN, # значение о шерифстве игрока
                 'vendetta':0, # (только для мафии) коэффициент неудобных мирных для мафии
-                'alive':1, # жив ли игрок
-                'lock':0 # зафиксировать подозрение к игроку
+                'lock':UNKNOWN, # зафиксировать подозрение к игроку
+                'alive':YES, # живой игрок
+                'quit':0 # состояние (жив, убит, заголосован)
             }
         ).astype(
             {'suspection':'float32', 'sheriff':'Int8', 'vendetta':'float32',
-             'alive':'Int8', 'lock':'Int8'})
+             'quit':'Int8', 'lock':'Int8'})
         self.knowledge.drop(index=self.id, inplace=True)
+        self.mafia_detected = False
 
     def __str__(self):
-        return f'Игрок #{self.id}, роль - {self.role}'
+        return f'Игрок #{self.id}, роль - {self.rouele}'
 
     def get_players(self, alive:int=None, color:int=None, sheriff:int=None,
-                    lock:int=None, players_id:list[int]=None):
+                    lock:int=None, quit:int=None, players_id:list[int]=None,
+                    exclude_players_id:list[int]=None):
         result = self.knowledge.copy()
         if alive is not None:
-            result.query('alive == @alive', inplace=True)
+            result.query('alive == @alive', engine='python', inplace=True)
         if color is not None:
             match color:
                 case 0:
-                    self.knowledge.query('lock == 0', inplace=True)
-                case 1:
-                    self.knowledge.query('lock == 1 and suspection == 12')
+                    result.query('lock == 0', engine='python', inplace=True)
                 case -1:
-                    self.knowledge.query('lock == 1 and suspection == 0')
+                    result.query('lock == 1 and suspection == 12', engine='python', inplace=True)
+                case 1:
+                    result.query('lock == 1 and suspection == 0', engine='python', inplace=True)
         if sheriff is not None:
-            result.query('sheriff == @sheriff', inplace=True)
+            result.query('sheriff == @sheriff', inplace=True, engine='python')
         if players_id is not None:
-            result.query('index in @players_id', inplace=True)
+            result.query('index in @players_id', inplace=True, engine='python')
+        if exclude_players_id is not None:
+            result.query('index not in @exclude_players_id', inplace=True, engine='python')
         if lock is not None:
-            result.query('lock == @lock', inplace=True)
+            result.query('lock == @lock', inplace=True, engine='python')
+        if quit is not None:
+            result.query('quit==@quit', inplace=True, engine='python')
         return result.index.to_list()
 
     def get_target(self, players_id=None, by='suspection'):
@@ -91,8 +103,7 @@ class Player:
     def suspect(self, index, value):
         if isinstance(index, int):
             index = [index]
-        align_group = self.knowledge\
-            .query('lock == 0 and index not in @index').index.to_list()
+        align_group = self.get_players(lock=0, exclude_players_id=index)
         target_group = self.get_players(lock=0, players_id=index)
         if abs(value) > 0:
             rest_value = -self.change_sus(target_group, value)
@@ -103,8 +114,7 @@ class Player:
     def set_sus(self, index, value, lock=False):
         if isinstance(index, int):
             index = [index]
-        align_group = self.knowledge\
-            .query('lock == 0 and index not in @index').index.to_list()
+        align_group = self.get_players(lock=0, exclude_players_id=index)
         rest_value = self.knowledge.loc[index, 'suspection'].sum() - len(index) * value
         self.knowledge.loc[index, 'suspection'] = value
         while abs(rest_value) > 0.02:
@@ -113,11 +123,59 @@ class Player:
             self.knowledge.loc[index, 'lock'] = YES
         self.round_sus()
 
+    def set_killed(self, index:int, sheriff=NO):
+        self.set_sus(index, self.min_sus)
+        self.knowledge.loc[index, 
+            ['sheriff', 'lock', 'alive', 'quit']
+        ] = [sheriff, YES, NO, KILLED]
+
+    def set_jailed(self, index, sheriff=NO):
+        self.knowledge.loc[index, ['sheriff', 'alive', 'quit']] = [
+            sheriff, NO, JAILED]
+
     def round_sus(self):
         if self.knowledge.suspection.sum() < self.total_sus:
             self.knowledge.suspection = np.ceil(self.knowledge.suspection * 100) / 100
         if self.knowledge.suspection.sum() > self.total_sus:
             self.knowledge.suspection = np.floor(self.knowledge.suspection * 100) / 100
+
+    def count_mafia(self):
+        if self.mafia_detected:
+            return
+        cnt_players = len(self.get_players(alive=YES)) + 1
+        jailed_unknown_players = self.get_players(quit=JAILED, color=UNKNOWN)
+        jailed_mafia = self.get_players(quit=JAILED, color=BLACK)
+        if cnt_players <= 4: # арестовано 2 мафии, 1 мафия в городе
+            if len(jailed_mafia) == 0:
+                self.set_sus(jailed_unknown_players,
+                    2*self.max_sus/len(jailed_unknown_players),
+                    lock=True)
+        elif cnt_players <= 6:
+            if len(jailed_mafia) == 0:
+                self.set_sus(jailed_unknown_players, 
+                    self.max_sus/len(jailed_unknown_players),
+                    lock=True)
+            elif len(jailed_mafia) == 1:
+                self.set_sus(jailed_unknown_players, 
+                    self.max_sus/len(jailed_unknown_players),
+                    lock=True)
+        unknown_players = self.get_players(color=UNKNOWN)
+        if len(self.get_players(color=BLACK)) == 3:
+            self.knowledge.loc[unknown_players, ['suspection', 'lock']
+                ] = [self.min_sus, YES]
+            self.mafia_detected = True
+            return
+        elif len(self.get_players(color=RED)) == 6:
+            self.knowledge.loc[unknown_players, ['suspection', 'lock']
+                ] = [self.max_sus, YES]
+            self.mafia_detected = True
+            return
+        elif len(self.get_players(lock=YES)) == 9:
+            self.mafia_detected = True
+            return
+
+            
+
 
     def set_exact_color(self, index, color):
         if isinstance(index, int):
@@ -187,11 +245,19 @@ class Don(Mafia):
             return 0
         elif self.get_players(sheriff=YES):
             self.mission_completed = True
-            self.knowledge.loc[self.get_players(sheriff=0), 'sheriff'] = -1
+            self.knowledge.loc[self.get_players(sheriff=UNKNOWN), 'sheriff'] = NO
         elif len(self.get_players(sheriff=NO)) == 6:
             self.mission_completed = True
-            self.knowledge['color'].replace(UNKNOWN, RED, inplace=True)
+            self.knowledge.loc[self.get_players(sheriff=UNKNOWN), 'sheriff'] = YES
         else:
             return self.get_target(
-                players_id=self.get_players(alive=YES, color=UNKNOWN),
+                players_id=self.get_players(alive=YES, sheriff=UNKNOWN),
                 by='suspection')
+
+a = Citizen(4)
+a.set_sus([7, 8], 12, True)
+for i in range(5, 10):
+    a.set_jailed(i)
+a.count_mafia()
+print(a.knowledge)
+print(a.knowledge.suspection.sum())

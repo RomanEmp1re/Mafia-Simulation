@@ -39,11 +39,13 @@ class Knowledge:
     def share_sus(self, index, value):
         if value > 0:
             target_group = self.table\
-                .query('index in @index and lock == 0 and suspection < @self.max_sus')\
+                .query('index in @index and lock == 0 and suspection < @self.max_sus',
+                    engine='python')\
                 .index.to_list()
         elif value < 0:
             target_group = self.table\
-                .query('index in @index and lock == 0 and suspection > @self.min_sus')\
+                .query('index in @index and lock == 0 and suspection > @self.min_sus',
+                    engine='python')\
                 .index.to_list()
         n_players = len(target_group)
         if n_players == 0:
@@ -56,9 +58,9 @@ class Knowledge:
         if isinstance(index, int):
             index = [index]
         align_group = self.table\
-            .query('lock == 0 and index not in @index').index.to_list()
+            .query('lock == 0 and index not in @index', engine='python').index.to_list()
         target_group = self.table\
-            .query('lock == 0 and index in @index').index.to_list()
+            .query('lock == 0 and index in @index', engine='python').index.to_list()
         if abs(value) > 0:
             rest_value = -self.change_sus(target_group, value)
             while abs(rest_value) > 0.0001:
@@ -70,7 +72,8 @@ class Knowledge:
         if isinstance(index, int):
             index = [index]
         align_group = self.table\
-            .query('lock == 0 and index not in @index').index.to_list()
+            .query('lock == 0 and index not in @index', engine='python')\
+            .index.to_list()
         rest_value = self.table.loc[index, 'suspection'].sum() - len(index) * value
         self.table.loc[index, 'suspection'] = value
         while abs(rest_value) > 0.0001:
