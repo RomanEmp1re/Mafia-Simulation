@@ -149,7 +149,6 @@ class Sheriff(Citizen):
             self.mission_completed = True
         elif len(self.get_players(color=RED)) == 6:
             self.mission_completed = True
-            self.knowledge['color'].replace(UNKNOWN, RED, inplace=True)
         else:
             return self.get_target(
                 players_id=self.get_players(alive=YES, color=UNKNOWN),
@@ -163,20 +162,17 @@ class Mafia(Player):
         self.shot_assigner = False
 
     def vote(self, candidates:list[int]) -> int:
-        result = self.get_players(color=RED, players_id=candidates)
-        if len(result) > 0:
-            return random.choice(result)
-        return random.choice(candidates)
+        return self.get_target(players_id=candidates, by='vendetta')
     
     def shot(self) -> int:
         result = self.get_players(alive=YES, sheriff=YES)
         if len(result) > 0: # стреляется шериф
-            return random.choice(result)
+            return result[0]
         result = self.get_players(alive=YES, sheriff=UNKNOWN)
         if len(result) > 0: # стреляется любой мирный, возможно шериф
-            return random.choice(result)
+            return self.get_target(players_id=result, by='vendetta')
         # стреляется любой живой красный игрок
-        return random.choice(self.get_players(alive=YES, color=RED))
+        return self.get_target(self.get_players(alive=YES), by='vendetta')
 
 
 class Don(Mafia):
@@ -189,24 +185,13 @@ class Don(Mafia):
     def check(self) -> int:
         if self.mission_completed:
             return 0
-        if self.get_players(sheriff=YES):
+        elif self.get_players(sheriff=YES):
             self.mission_completed = True
-            self.knowledge['sheriff'] = self.knowledge['sheriff'].replace(UNKNOWN, NO)
-            return 0
-        result = self.get_players(alive=YES, sheriff=UNKNOWN)
-        if len(result) > 0:
-            return random.choice(result)
-        return random.choice(self.get_players(sheriff=UNKNOWN))
-
-
-if __name__== '__main__':
-    p = Sheriff(10)
-    p.suspect([1, 3, 4], 4)
-    p.suspect([8, 9], 6)
-    p.suspect([3, 1], -5)
-    p.suspect([9], -5)
-    p.suspect([5], 4)
-    p.suspect([3], 3)
-    print(p.knowledge)
-    print(p.knowledge.suspection.sum())
-    print(p.check())
+            self.knowledge.loc[self.get_players(sheriff=0), 'sheriff'] = -1
+        elif len(self.get_players(sheriff=NO)) == 6:
+            self.mission_completed = True
+            self.knowledge['color'].replace(UNKNOWN, RED, inplace=True)
+        else:
+            return self.get_target(
+                players_id=self.get_players(alive=YES, color=UNKNOWN),
+                by='suspection')
