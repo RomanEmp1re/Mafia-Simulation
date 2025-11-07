@@ -19,6 +19,16 @@ class Player:
     max_sus = total_sus / 3
     base_sus = total_sus / 9
     min_sus = 0
+    count_mapping = pd.DataFrame(
+        index=[0, 1, 2], # количество известных посаженных мафий
+        columns=[6, 5, 4, 3], # количество игроков за столом
+        data=[
+            [max_sus, pd.NA, min_sus], # 6
+            [max_sus, pd.NA, min_sus], # 5
+            [2*max_sus, max_sus, min_sus], # 4
+            [2*max_sus, max_sus, min_sus], # 3
+        ]
+    )
     def __init__(self, id:int):
         self.id = id
         self.alive = True
@@ -144,21 +154,12 @@ class Player:
             return
         cnt_players = len(self.get_players(alive=YES)) + 1
         jailed_unknown_players = self.get_players(quit=JAILED, color=UNKNOWN)
-        jailed_mafia = self.get_players(quit=JAILED, color=BLACK)
-        if cnt_players <= 4: # арестовано 2 мафии, 1 мафия в городе
-            if len(jailed_mafia) == 0:
-                self.set_sus(jailed_unknown_players,
-                    2*self.max_sus/len(jailed_unknown_players),
-                    lock=True)
-        elif cnt_players <= 6:
-            if len(jailed_mafia) == 0:
-                self.set_sus(jailed_unknown_players, 
-                    self.max_sus/len(jailed_unknown_players),
-                    lock=True)
-            elif len(jailed_mafia) == 1:
-                self.set_sus(jailed_unknown_players, 
-                    self.max_sus/len(jailed_unknown_players),
-                    lock=True)
+        cnt_jailed_mafia = len(self.get_players(quit=JAILED, color=BLACK))
+        rest_sus = self.count_mapping.at[cnt_jailed_mafia, cnt_players]
+        if rest_sus:
+            self.set_sus(jailed_unknown_players, 
+                rest_sus/len(jailed_unknown_players),
+                lock=True)
         unknown_players = self.get_players(color=UNKNOWN)
         if len(self.get_players(color=BLACK)) == 3:
             self.knowledge.loc[unknown_players, ['suspection', 'lock']
@@ -255,9 +256,23 @@ class Don(Mafia):
                 by='suspection')
 
 a = Citizen(4)
+print(Player.count_mapping)
 a.set_sus([7, 8], 12, True)
 for i in range(5, 10):
     a.set_jailed(i)
 a.count_mafia()
 print(a.knowledge)
 print(a.knowledge.suspection.sum())
+
+# BUG когда в 0 пилим пятерых игроков и поднимаем, при этом знаем, что два 
+# игрока в подъеме точно мафия, то получем некорректный счет
+# подозрение распределяется среди попиленных неизвестных и живых неизвестных
+# хотя игра должна понимать, что если игра продолжается, значит за столом есть
+# только одна мафия, значит это подозрение надо распределить только
+# среди оставшихся игроков
+# TODO счет должен вестись отдельно среди покинувших игру и среди живых.
+# алгоритм:
+# 1. Понять, сколько мафии точно.
+# Если точной инфы нет, ведем счет как прежде
+# Если одна мафия точно покинула стол, круг при семерых, то
+# внедряем маппинг для счета, чтобы упростить код
