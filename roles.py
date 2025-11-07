@@ -19,16 +19,6 @@ class Player:
     max_sus = total_sus / 3
     base_sus = total_sus / 9
     min_sus = 0
-    count_mapping = pd.DataFrame(
-        index=[0, 1, 2], # количество известных посаженных мафий
-        columns=[6, 5, 4, 3], # количество игроков за столом
-        data=[
-            [max_sus, pd.NA, min_sus], # 6
-            [max_sus, pd.NA, min_sus], # 5
-            [2*max_sus, max_sus, min_sus], # 4
-            [2*max_sus, max_sus, min_sus], # 3
-        ]
-    )
     def __init__(self, id:int):
         self.id = id
         self.alive = True
@@ -149,35 +139,6 @@ class Player:
         if self.knowledge.suspection.sum() > self.total_sus:
             self.knowledge.suspection = np.floor(self.knowledge.suspection * 100) / 100
 
-    def count_mafia(self):
-        if self.mafia_detected:
-            return
-        cnt_players = len(self.get_players(alive=YES)) + 1
-        jailed_unknown_players = self.get_players(quit=JAILED, color=UNKNOWN)
-        cnt_jailed_mafia = len(self.get_players(quit=JAILED, color=BLACK))
-        rest_sus = self.count_mapping.at[cnt_jailed_mafia, cnt_players]
-        if rest_sus:
-            self.set_sus(jailed_unknown_players, 
-                rest_sus/len(jailed_unknown_players),
-                lock=True)
-        unknown_players = self.get_players(color=UNKNOWN)
-        if len(self.get_players(color=BLACK)) == 3:
-            self.knowledge.loc[unknown_players, ['suspection', 'lock']
-                ] = [self.min_sus, YES]
-            self.mafia_detected = True
-            return
-        elif len(self.get_players(color=RED)) == 6:
-            self.knowledge.loc[unknown_players, ['suspection', 'lock']
-                ] = [self.max_sus, YES]
-            self.mafia_detected = True
-            return
-        elif len(self.get_players(lock=YES)) == 9:
-            self.mafia_detected = True
-            return
-
-            
-
-
     def set_exact_color(self, index, color):
         if isinstance(index, int):
             index = [index]
@@ -260,7 +221,6 @@ print(Player.count_mapping)
 a.set_sus([7, 8], 12, True)
 for i in range(5, 10):
     a.set_jailed(i)
-a.count_mafia()
 print(a.knowledge)
 print(a.knowledge.suspection.sum())
 
