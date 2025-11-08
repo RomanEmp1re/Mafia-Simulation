@@ -1,10 +1,10 @@
 from roles import *
 import random
 import pandas as pd
+import yaml
 
 
 class Game:
-    roles = [Mafia] * 2 + [Don] + [Citizen] * 6 + [Sheriff]
     table_template = pd.DataFrame(
         index=range(1, 11),
         data={
@@ -17,17 +17,35 @@ class Game:
         index=range(1, 11),
         data={'color':UNKNOWN, 'sheriff':UNKNOWN, 'alive':YES, 'quit':UNKNOWN}
     ).astype({'color':'Int8', 'sheriff':'Int8', 'alive':'Int8', 'quit':'Int8'})
-    def __init__(self):
-        self.roles_random = self.roles.copy()
-        random.shuffle(self.roles_random)
+
+    def __init__(self, custom_roles:dict=None):
         self.game_log = 'Добро пожаловать в интеллектуально'\
             '-психологическую игру Мафия!'
+        mafia_cards = [Mafia] * 2
+        sheriff_cards = [Sheriff]
+        citizen_cards = [Citizen] * 6
+        don_cards = [Don]
         self.players = pd.Series(
             index=range(1, 11),
             data=None
         ).astype('object')
-        for i in self.players.index:
-            self.players[i] = self.roles_random[i - 1](i)
+        if custom_roles is not None:
+            for role, players_list in custom_roles.items():
+                for p in players_list:
+                    match role:
+                        case 'don':
+                            self.players[p] = don_cards.pop()(p)
+                        case 'mafia':
+                            self.players[p] = mafia_cards.pop()(p)
+                        case 'sheriff':
+                            self.players[p] = sheriff_cards.pop()(p)
+                        case 'citizen':
+                            self.players[p] = citizen_cards.pop()(p)
+        all_cards = mafia_cards + sheriff_cards + don_cards + citizen_cards
+        random.shuffle(all_cards)
+        if len(all_cards) > 0:
+            for p in self.players[self.players.isna()].index:
+                self.players[p] = all_cards.pop()(p)
         self.table = self.table_template.copy()
         for p in self.players:
             self.table.loc[p.id, :] = {
@@ -182,7 +200,6 @@ class Game:
 
     # ночной отстрел игрока
     def kill_player(self, id):
-        print(f'цель стрельбы - {id}')
         victim = self.players[id]
         victim.alive = False
         self.table.loc[id, ['alive', 'quit']] = [NO, KILLED]
@@ -200,10 +217,10 @@ class Game:
 
     # вскрытие шерифа
     def sheriff_confess(self):
-        sheriff = self.get_players(role='Sheriff', type_result=int)[0]
-        self.common_knowledge.loc[sheriff, ['color', 'Sheriff']] = [RED, YES]
+        sheriff = self.get_players(role='Sheriff').iat[0]
+        self.common_knowledge.loc[sheriff.id, ['color', 'Sheriff']] = [RED, YES]
         checked_players = sheriff.knowledge.query('checked == 1')
-        self.common_knowledge.update[checked_players[['color']]]
+        self.common_knowledge.update(checked_players[['color']])
 
     # голосование
     def election(self, candidates_id:list[int], re_election=False):
@@ -283,6 +300,9 @@ class Game:
                 print(self.game_log)
                 raise Exception
 
+class GameScenario:
+    ...
+
 if __name__=='__main__':
-    g1 = Game()
-    g1.start_game()
+    g1 = Game(custom_roles={'don':[1], 'sheriff':[2], 'mafia':[6, 7]})
+    print(g1.table)

@@ -1,0 +1,4 @@
+roles:
+  don: [1]
+  mafia: [3, 4]
+  sheriff: [10]
