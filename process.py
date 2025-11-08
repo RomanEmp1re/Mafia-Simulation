@@ -1,18 +1,22 @@
-from roles import Citizen, Mafia, Don, Sheriff
+from roles import *
 import random
 import pandas as pd
 
 
-ALIVE = 1
-BLACK = -1
-RED = 1
-UNKNOWN = 0
-YES = 1
-NO = - 1
-
-
 class Game:
     roles = [Mafia] * 2 + [Don] + [Citizen] * 6 + [Sheriff]
+    table_template = pd.DataFrame(
+        index=range(1, 11),
+        data={
+            'color':UNKNOWN, 'sheriff':UNKNOWN, 'role':UNKNOWN, 
+            'alive':UNKNOWN, 'quit':UNKNOWN,
+        }
+    ).astype({'color':'Int8', 'sheriff':'Int8', 'role':'object', 'alive':'Int8',
+             'quit':'Int8'})
+    common_knowledge_template = pd.DataFrame(
+        index=range(1, 11),
+        data={'color':UNKNOWN, 'sheriff':UNKNOWN, 'alive':YES, 'quit':UNKNOWN}
+    ).astype({'color':'Int8', 'sheriff':'Int8', 'alive':'Int8', 'quit':'Int8'})
     def __init__(self):
         self.roles_random = self.roles.copy()
         random.shuffle(self.roles_random)
@@ -24,47 +28,65 @@ class Game:
         ).astype('object')
         for i in self.players.index:
             self.players[i] = self.roles_random[i - 1](i)
-        self.update_table()
+        self.table = self.table_template.copy()
+        for p in self.players:
+            self.table.loc[p.id, :] = {
+                'color' : BLACK if isinstance(p, Mafia) else RED,
+                'sheriff' : YES if isinstance(p, Sheriff) else NO,
+                'role' : p.role,
+                'alive' : YES,
+                'quit' : UNKNOWN
+            }
         self.log('roles')
-        for i in self.get_players(color=-1):
+        for i in self.get_players(color=BLACK):
             i.knowledge['color'] = self.table['color']
-            i.knowledge.loc[list(i.get_players(color=-1)), 'sheriff'] = -1
+            i.knowledge['suspection'] = self.table['color'].map(
+                {BLACK:Player.max_sus, RED:Player.min_sus}) 
+            i.knowledge.loc[i.get_players(color=BLACK), 'sheriff'] = NO
         self.log('mafia_talk')
         self.log('sheriff_sign')
+        self.common_knowledge = self.common_knowledge_template.copy()
 
-    def update_table(self):
-        self.table = pd.DataFrame(
-            index=range(1, 11),
-            data = {
-                'color': map(lambda x : BLACK if isinstance(x, Mafia) else RED, self.players),
-                'sheriff': map(lambda x : YES if isinstance(x, Sheriff) else NO, self.players),
-                'role': map(lambda x : x.role, self.players),
-                'alive': map(lambda x : YES if x.alive else NO, self.players)
-            }
-        )
+    @property
+    def pretty_table(self, alive_only=False):
+        return self.table.assign(
+            quit=self.table.quit.map({
+                UNKNOWN:'',
+                JAILED:'jailed',
+                KILLED:'killed'
+            })
+        )[['role', 'quit']]
 
-    def get_players(self, color=None, role=None, alive=None, type_result='obj'):
-        result = self.players.copy()
+    # выборка игроков по признаку
+    def get_players(self, color=None, role=None, alive=None,
+        quit=None, type_result='obj'):
+        result = self.table.copy()
         if color is not None:
-            result = result[self.table['color']==color]
+            result.query('color == @color',  inplace=True, engine='python')
         if role is not None:
-            result = result[self.table['role']==role]
+            result.query('role == @role',  inplace=True, engine='python')
         if alive is not None:
-            result = result[self.table['alive']==alive]
+            result.query('alive == @alive',  inplace=True, engine='python')
+        if quit is not None:
+            result.query('quit == @quit',  inplace=True, engine='python')
         match type_result:
             case 'obj':
-                return result
+                return self.players[result.index]
             case 'int':
-                return [p.id for p in result]
+                return result.index.to_list()
             case 'str':
-                return ' '.join([str(p.id).ljust(2) for p in result])
+                return ' '.join(result.index.astype('string').to_list())
+            case 'df':
+                return result
+            case 'cute':
+                return self.pretty_table.loc[result.index]
 
     # ведение лога игры
     def log(self, event, **kwargs):
         self.game_log += '\n'
         match event:
             case 'roles':
-                self.game_log += f'Карты розданы, в игре у игроков следующие роли:\n{self.table}'
+                self.game_log += f'Карты розданы, в игре у игроков следующие роли:\n{self.pretty_table['role']}'
             case 'mafia_talk':
                 self.game_log += (
                     'Мафия знакомится, черная команда: ' +
@@ -79,7 +101,6 @@ class Game:
             case 'hunt':
                 victim = kwargs['victim']
                 self.game_log += f'Этой ночью был убит игрок {victim}'
-            # === ГОЛОСОВАНИЕ ===
             case 'declare_election':
                 players = ' '.join(str(i) for i in kwargs['players'])
                 self.game_log += f'Объявлено голосование между игроками {players}'
@@ -120,10 +141,9 @@ class Game:
 
     # ночной отстрел
     def hunt(self):
-        for m in self.get_players(color=-1, alive=1):
+        for m in self.get_players(color=BLACK, alive=YES):
             if m.shot_assigner:
                 target = m.shot()
-                self.kill_player(target)
                 self.log(event='hunt', victim=target)
                 return target
 
@@ -134,6 +154,8 @@ class Game:
         if target:
             result = self.table.loc[target, 'sheriff']
             player.knowledge.loc[target, 'sheriff'] = result
+            if result == YES:
+                player.set_sheriff(target)
             self.log('don_check', target=target, result=result)
 
     # проверка шерифа
@@ -142,53 +164,71 @@ class Game:
         target = player.check()
         if target:
             result = self.table.loc[target, 'color']
-            player.knowledge.loc[target, 'color'] = result
+            player.set_exact_color(index=target, color=result)
             self.log('sheriff_check', target=target, result=result)
 
     # актуализация знаний жителей
-    def update_knowledge(self):
+    def update_players_knowledge(self):
         for p in self.players:
-            p.knowledge['alive'].update(self.table['alive'])
-        # Если дон погиб, обязанности по отстрелу передаюся на любую из оставшихся мафий
+            p.knowledge.update(self.common_knowledge.query('color != @UNKNOWN'))
 
+    # заголосование игрока
+    def jail_player(self, id):
+        self.players[id].avlie = False
+        self.table.loc[id, ['alive', 'quit']] = [NO, JAILED]
+        if self.players[id].role == 'mafia' and self.players[id].shot_assigner:
+            self.reassign_shoter()
+        return id
+
+    # ночной отстрел игрока
     def kill_player(self, id):
-        try:
-            self.players[id].alive = False
-            self.update_table()
-        except:
-            print(id)
-            print(self.table)
-        # передача обязанностей по назначению отстрела
+        print(f'цель стрельбы - {id}')
+        victim = self.players[id]
+        victim.alive = False
+        self.table.loc[id, ['alive', 'quit']] = [NO, KILLED]
         if self.players[id].role in ('Mafia', 'Don'):
             if self.players[id].shot_assigner:
-                mafia_list = self.get_players(role='Mafia', alive=1, type_result='int')
-                mafia_list = [m for m in mafia_list if m != id]
-                if mafia_list:
-                    inherits_power = random.choice(mafia_list)
-                    self.players[inherits_power].shot_assigner = True
+                self.reassign_shoter()
+        return id
+
+    # переназначение мафии, которая будет давать отстрел
+    def reassign_shoter(self):
+        mafia_list = self.get_players(role='Mafia', alive=YES, type_result='int')
+        if mafia_list:
+            inherits_power = random.choice(mafia_list)
+            self.players[inherits_power].shot_assigner = True
+
+    # вскрытие шерифа
+    def sheriff_confess(self):
+        sheriff = self.get_players(role='Sheriff', type_result=int)[0]
+        self.common_knowledge.loc[sheriff, ['color', 'Sheriff']] = [RED, YES]
+        checked_players = sheriff.knowledge.query('checked == 1')
+        self.common_knowledge.update[checked_players[['color']]]
 
     # голосование
     def election(self, candidates_id:list[int], re_election=False):
         election_list = pd.DataFrame(
-            index=candidates_id, data={'voted_by': None, 'votes_recieved':0})
-        election_list['voted_by'].astype('object')
+            index=candidates_id, data={'voted_by': None, 'votes_recieved':0})\
+            .astype({'voted_by':'object', 'votes_recieved':'Int8'})
         election_list['voted_by'] = [[] for _ in range(len(candidates_id))]
         if re_election:
             self.log(event='reelection', candidates=candidates_id)
         else:
             self.log(event='declare_election', players=candidates_id)
-        voters = self.get_players(alive=1)
+        voters = self.get_players(alive=YES)
         for p in voters:
-            target = p.vote(candidates_id)
-            election_list.loc[target, 'voted_by'].append(p.id)
-            election_list.loc[target, 'votes_recieved'] += 1
+            target_id = p.vote(candidates_id)
+            target = self.players[target_id]
+            election_list.loc[target_id, 'voted_by'].append(p.id)
+            election_list.loc[target_id, 'votes_recieved'] += 1
+            target.suspect(p.id, target.rancor_rate)
         for p in election_list.query('votes_recieved > 0').iterrows():
             self.log(event='vote', players=p[1], victim=p[0])
         max_votes = election_list['votes_recieved'].max()
         leaders_id = election_list.query('votes_recieved == @max_votes').index.to_list()
         if len(leaders_id) == 1: # когда был выбран один игрок
             victim = leaders_id[0]
-            self.kill_player(victim)
+            self.jail_player(victim)
             self.log('leader', victim=victim)
             return [victim], True # True означает, что голосование проведено 
         else: # выбрано несколько игроков на голосовании
@@ -218,25 +258,31 @@ class Game:
         return 0
     
     def start_game(self):
-        for i in range(20):
-            self.log(event='night') # ночь
-            shot_target = self.hunt() # ночной отстрел
-            win = self.check_win() # проверка условия победы
-            if win:
-                return win
-            self.don_check() # проверка дона
-            self.sheriff_check() # проверка шерифа
-            self.kill_player(shot_target)
-            self.update_knowledge()
-            e = self.election(self.get_players(alive=1, type_result='int'))
-            if not e[1]:
-                self.election(re_election=True, candidates_id=e[0])
-            self.update_knowledge()
-            win = self.check_win()
-            if win:
-                return win
+        for _ in range(10):
+            try:
+                self.log(event='night') # ночь
+                shot_target = self.hunt() # ночной отстрел
+                win = self.check_win() # проверка условия победы
+                if win:
+                    return win
+                self.don_check() # проверка дона
+                self.sheriff_check() # проверка шерифа
+                self.kill_player(shot_target)
+                if self.players[shot_target].role == 'Sheriff':
+                    self.sheriff_confess()
+                self.update_players_knowledge()
+                e = self.election(self.get_players(alive=1, type_result='int'))
+                if not e[1]:
+                    self.election(re_election=True, candidates_id=e[0])
+                self.update_players_knowledge()
+                win = self.check_win()
+                if win:
+                    return win
+            except Exception:
+                print(self.table)
+                print(self.game_log)
+                raise Exception
 
 if __name__=='__main__':
     g1 = Game()
-    i = g1.start_game()
-    print(g1.game_log)
+    g1.start_game()
