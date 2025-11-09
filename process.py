@@ -4,6 +4,13 @@ import pandas as pd
 import yaml
 
 
+class GameScenario:
+    def __init__(self, file):
+        with open(file) as f:
+            self.scenario = yaml.safe_load(f)
+        self.roles = self.scenario['roles']
+
+
 class Game:
     table_template = pd.DataFrame(
         index=range(1, 11),
@@ -18,18 +25,20 @@ class Game:
         data={'color':UNKNOWN, 'sheriff':UNKNOWN, 'alive':YES, 'quit':UNKNOWN}
     ).astype({'color':'Int8', 'sheriff':'Int8', 'alive':'Int8', 'quit':'Int8'})
 
-    def __init__(self, custom_roles:dict=None):
+    def __init__(self, custom_scenario:GameScenario={}):
         self.game_log = 'Добро пожаловать в интеллектуально'\
             '-психологическую игру Мафия!'
         mafia_cards = [Mafia] * 2
         sheriff_cards = [Sheriff]
         citizen_cards = [Citizen] * 6
         don_cards = [Don]
+        self.custom_scenario = custom_scenario
+        custom_roles = custom_scenario.scenario['roles']
         self.players = pd.Series(
             index=range(1, 11),
             data=None
         ).astype('object')
-        if custom_roles is not None:
+        if custom_scenario.roles is not None:
             for role, players_list in custom_roles.items():
                 for p in players_list:
                     match role:
@@ -64,6 +73,7 @@ class Game:
         self.log('mafia_talk')
         self.log('sheriff_sign')
         self.common_knowledge = self.common_knowledge_template.copy()
+        self.day_num = 0
 
     @property
     def pretty_table(self, alive_only=False):
@@ -158,7 +168,9 @@ class Game:
                 self.game_log += 'Выграл мирный город'
 
     # ночной отстрел
-    def hunt(self):
+    def hunt(self, custom_target=None):
+        if custom_target is not None:
+            return custom_target
         for m in self.get_players(color=BLACK, alive=YES):
             if m.shot_assigner:
                 target = m.shot()
@@ -277,8 +289,10 @@ class Game:
     def start_game(self):
         for _ in range(10):
             try:
+                self.day_num += 1
+                self.day_scenario = self.custom_scenario.scenario[self.day_num]
                 self.log(event='night') # ночь
-                shot_target = self.hunt() # ночной отстрел
+                shot_target = self.hunt(custom_target = self.day_scenario['kill']) # ночной отстрел
                 win = self.check_win() # проверка условия победы
                 if win:
                     return win
@@ -300,9 +314,10 @@ class Game:
                 print(self.game_log)
                 raise Exception
 
-class GameScenario:
-    ...
 
 if __name__=='__main__':
-    g1 = Game(custom_roles={'don':[1], 'sheriff':[2], 'mafia':[6, 7]})
-    print(g1.table)
+    gs = GameScenario('custom_game.yaml')
+    print(gs.scenario)
+    g = Game(custom_scenario = gs)
+    g.start_game()
+    print(g.table)
