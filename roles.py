@@ -182,6 +182,7 @@ class Sheriff(Citizen):
             target = self.get_target(
                 players_id=self.get_players(alive=YES, color=UNKNOWN),
                 by='suspection')
+            self.knowledge.loc[target.id, 'checked'] = YES
             return target
         return 0
 

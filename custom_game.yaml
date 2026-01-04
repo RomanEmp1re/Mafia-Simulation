@@ -1,6 +1,6 @@
 roles:
   don: [1]
-  mafia: [3, 4]
+  mafia: [3, 5]
   sheriff: [10]
 1:
   kill: 4

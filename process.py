@@ -163,24 +163,37 @@ class Game:
                 target = str(kwargs['target'])
                 self.game_log += f'Шериф проверяет игрока {target}. Игрок {target} - {result}'
             case 'mafia_won':
-                self.game_log += 'Мафия выиграла!'
+                match kwargs['count_mafia']:
+                    case 3:
+                        self.game_log += 'Мафия выиграла 3 в 3! Позор мирным'
+                    case 2:
+                        self.game_log += 'Мафия победила 2 в 2'
+                    case 1:
+                        self.game_log += 'Мафия выйграла в угадайке! Город был близко'
             case 'city_won':
+                self.game_log += f'Мирные победили! Осталось мирных {kwargs['count_citizens']}'
+                
+
                 self.game_log += 'Выграл мирный город'
 
     # ночной отстрел
     def hunt(self, custom_target=None):
         if custom_target is not None:
-            return custom_target
-        for m in self.get_players(color=BLACK, alive=YES):
-            if m.shot_assigner:
-                target = m.shot()
-                self.log(event='hunt', victim=target)
-                return target
+            target = custom_target
+        else:
+            for m in self.get_players(color=BLACK, alive=YES):
+                if m.shot_assigner:
+                    target = m.shot()
+        self.log(event='hunt', victim=target)
+        return target
 
     # проверка дона
-    def don_check(self):
+    def don_check(self, custom_target=None):
         player = self.get_players(role='Don').iat[0]
-        target = player.check()
+        if custom_target is not None:
+            target = custom_target
+        else:
+            target = player.check()
         if target:
             result = self.table.loc[target, 'sheriff']
             player.knowledge.loc[target, 'sheriff'] = result
@@ -189,9 +202,12 @@ class Game:
             self.log('don_check', target=target, result=result)
 
     # проверка шерифа
-    def sheriff_check(self):
+    def sheriff_check(self, custom_target=None):
         player = self.get_players(role='Sheriff').iat[0]
-        target = player.check()
+        if custom_target is not None:
+            target = custom_target
+        else:
+            target = player.check()
         if target:
             result = self.table.loc[target, 'color']
             player.set_exact_color(index=target, color=result)
@@ -204,10 +220,11 @@ class Game:
 
     # заголосование игрока
     def jail_player(self, id):
-        self.players[id].avlie = False
+        self.players[id].alive = False
         self.table.loc[id, ['alive', 'quit']] = [NO, JAILED]
-        if self.players[id].role == 'mafia' and self.players[id].shot_assigner:
+        if self.players[id].role == 'Mafia' and self.players[id].shot_assigner:
             self.reassign_shoter()
+        self.common_knowledge.loc[id, ['alive', 'quit']] = [NO, JAILED]
         return id
 
     # ночной отстрел игрока
@@ -218,6 +235,7 @@ class Game:
         if self.players[id].role in ('Mafia', 'Don'):
             if self.players[id].shot_assigner:
                 self.reassign_shoter()
+        self.common_knowledge.loc[id, ['color', 'alive', 'quit']] = [RED, NO, KILLED]
         return id
 
     # переназначение мафии, которая будет давать отстрел
@@ -230,7 +248,7 @@ class Game:
     # вскрытие шерифа
     def sheriff_confess(self):
         sheriff = self.get_players(role='Sheriff').iat[0]
-        self.common_knowledge.loc[sheriff.id, ['color', 'Sheriff']] = [RED, YES]
+        self.common_knowledge.loc[sheriff.id, ['color', 'sheriff']] = [RED, YES]
         checked_players = sheriff.knowledge.query('checked == 1')
         self.common_knowledge.update(checked_players[['color']])
 
@@ -245,8 +263,15 @@ class Game:
         else:
             self.log(event='declare_election', players=candidates_id)
         voters = self.get_players(alive=YES)
+        if 'election' in self.day_scenario:
+            custom_election = self.day_scenario['election']
+        else:
+            custom_election = {}
         for p in voters:
-            target_id = p.vote(candidates_id)
+            if p.id in custom_election:
+                target_id = custom_election[p.id]
+            else:
+                target_id = p.vote(candidates_id)
             target = self.players[target_id]
             election_list.loc[target_id, 'voted_by'].append(p.id)
             election_list.loc[target_id, 'votes_recieved'] += 1
@@ -266,7 +291,7 @@ class Game:
                 self.log('mass', players=leaders_id)
                 if random.random() > 0.5: # пока заглушка - поднять или оставить 50/50
                     for l in leaders_id:
-                        self.kill_player(l)
+                        self.jail_player(l)
                     self.log('lift', players=leaders_id)
                     return leaders_id, True
                 else:
@@ -277,42 +302,55 @@ class Game:
 
     # проверка условия победы
     def check_win(self):
-        if self.get_players(color=-1, alive=1).count() >= self.get_players(
-            color=1, alive=1).count():
-            self.log('mafia_won')
+        if self.get_players(color=BLACK, alive=YES).count() >= self.get_players(
+            color=RED, alive=YES).count():
+            self.log('mafia_won', count_mafia = self.get_players(color=BLACK, alive=YES))
             return -1
-        elif self.get_players(color=-1, alive=1).count() == 0:
-            self.log('city_won')
+        elif self.get_players(color=BLACK, alive=YES).count() == 0:
+            self.log('city_won', count_citizens=self.get_players(color=RED, alive=YES))
             return 1
         return 0
     
     def start_game(self):
         for _ in range(10):
-            try:
-                self.day_num += 1
+            self.day_num += 1
+            if self.day_num in self.custom_scenario.scenario:
                 self.day_scenario = self.custom_scenario.scenario[self.day_num]
-                self.log(event='night') # ночь
+            else:
+                self.day_scenario = {}
+            self.log(event='night') # ночь
+            if 'kill' in self.day_scenario:
                 shot_target = self.hunt(custom_target = self.day_scenario['kill']) # ночной отстрел
-                win = self.check_win() # проверка условия победы
-                if win:
-                    return win
-                self.don_check() # проверка дона
-                self.sheriff_check() # проверка шерифа
-                self.kill_player(shot_target)
-                if self.players[shot_target].role == 'Sheriff':
-                    self.sheriff_confess()
-                self.update_players_knowledge()
+            else:
+                shot_target = self.hunt()
+            win = self.check_win() # проверка условия победы
+            if win:
+                return win
+            if self.get_players(role='Don', alive=YES, type_result='int'):
+                if 'don' in self.day_scenario: # проверка дона
+                    self.don_check(custom_target=self.day_scenario['don'])
+                else:
+                    self.don_check()
+            if self.get_players(role='Sheriff', alive=YES, type_result='int'):
+                if 'sheriff' in self.day_scenario: # проверка шерифа
+                    self.sheriff_check(custom_target=self.day_scenario['sheriff']) 
+                else:
+                    self.sheriff_check() 
+            self.kill_player(shot_target)
+            if self.players[shot_target].role == 'Sheriff': # шерифф вскрывается, если убили его
+                self.sheriff_confess()
+            self.update_players_knowledge()
+            if 'jail' in self.day_scenario:
+                for id in self.day_scenario['jail']:
+                    self.jail_player(id=id)
+            else:
                 e = self.election(self.get_players(alive=1, type_result='int'))
                 if not e[1]:
                     self.election(re_election=True, candidates_id=e[0])
-                self.update_players_knowledge()
-                win = self.check_win()
-                if win:
-                    return win
-            except Exception:
-                print(self.table)
-                print(self.game_log)
-                raise Exception
+            self.update_players_knowledge()
+            win = self.check_win()
+            if win:
+                return win
 
 
 if __name__=='__main__':
@@ -321,3 +359,10 @@ if __name__=='__main__':
     g = Game(custom_scenario = gs)
     g.start_game()
     print(g.table)
+    print(g.day_num)
+    print(g.game_log)
+
+# BUG не работает confess
+# BUG при моем сценарии все почему-то на втором голосовании голосуют в 1
+# BUG в common_knowledge обносления прошли только после убийства шерифа
+# BUG в common knowledge появляется стобец Sheriff, вместо обновления sheriff
